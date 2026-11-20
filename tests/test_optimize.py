@@ -245,7 +245,8 @@ def test_format() -> None:
 
 def test_dialog_smoke(heavy_pdf: Path, tmp_path: Path) -> None:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-    widgets = pytest.importorskip("PySide6.QtWidgets")
+    # ImportError incluye la falta de librerías del sistema (p. ej. libGL en Linux).
+    widgets = pytest.importorskip("PySide6.QtWidgets", exc_type=ImportError)
     from xpdf.ui.optimize_dialog import OptimizeDialog
 
     app = widgets.QApplication.instance() or widgets.QApplication([])
