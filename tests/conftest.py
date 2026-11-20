@@ -135,3 +135,18 @@ def visual_dump(request: pytest.FixtureRequest) -> Iterator[Callable[..., Path |
         return dump_if_requested(name, before, after, region)  # type: ignore[arg-type]
 
     yield _dump
+
+
+def pytest_runtest_logreport(report: pytest.TestReport) -> None:
+    """En GitHub Actions, cada fallo se publica como anotación (visible sin
+    autenticarse en un repositorio público, a diferencia de los registros)."""
+    import os
+    import sys
+
+    if not os.environ.get("GITHUB_ACTIONS") or not report.failed:
+        return
+    text = report.longreprtext[-3000:]
+    msg = text.replace("%", "%25").replace("\r", "").replace("\n", "%0A")
+    title = report.nodeid.replace(",", "%2C").replace("::", " · ")
+    sys.__stdout__.write(f"::error title={title}::{msg}\n")
+    sys.__stdout__.flush()
