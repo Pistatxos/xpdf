@@ -1,6 +1,6 @@
 """xpdf — editor de PDF de escritorio, minimalista."""
 
-__version__ = "0.3.3"
+__version__ = "0.3.4"
 
 #: Repositorio público de GitHub (usuario/nombre): de aquí salen las versiones
 #: que descarga el actualizador. Es el único sitio donde se configura.
