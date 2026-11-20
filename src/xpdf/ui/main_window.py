@@ -29,6 +29,7 @@ from xpdf.core.document import Document
 from xpdf.core.editing import NewTextStyle, TextEditing, TextOutcome
 from xpdf.core.errors import XpdfError
 from xpdf.core.history import History
+from xpdf.core.pages import delete_command, move_command, rotate_command
 from xpdf.ui.format_bar import FormatBar
 from xpdf.ui.icons import icon
 from xpdf.ui.optimize_dialog import run_optimize_dialog
@@ -80,6 +81,9 @@ class MainWindow(QMainWindow):
         self.view.zoomChanged.connect(self._on_zoom_changed)
         self.view.currentPageChanged.connect(self._on_page_changed)
         self.thumbs.pageActivated.connect(self.view.scroll_to_page)
+        self.thumbs.pagesMoved.connect(self.move_pages)
+        self.thumbs.deleteRequested.connect(self.delete_pages)
+        self.thumbs.rotateRequested.connect(self.rotate_pages)
 
         self.setAcceptDrops(True)
         self.resize(1200, 860)
@@ -120,6 +124,18 @@ class MainWindow(QMainWindow):
         if K(S.Redo) != redo_keys[0]:
             redo_keys.append(K(S.Redo))  # Ctrl+Y en Windows
         self.act_redo = self._act("Rehacer", self.redo, "redo", redo_keys)
+        self.act_rot_left = self._act(
+            "Girar a la izquierda", lambda: self.rotate_pages(-90), "rotate-left",
+            [K("Ctrl+L")], "Girar las páginas seleccionadas a la izquierda",
+        )
+        self.act_rot_right = self._act(
+            "Girar a la derecha", lambda: self.rotate_pages(90), "rotate-right",
+            [K("Ctrl+R")], "Girar las páginas seleccionadas a la derecha",
+        )
+        self.act_delete_pages = self._act(
+            "Borrar páginas", lambda: self.delete_pages(), "trash", None,
+            "Borrar las páginas seleccionadas (Supr en las miniaturas)",
+        )
         self.act_optimize = self._act(
             "Reducir tamaño…", self.optimize, None, None, "Guardar una copia que ocupe menos"
         )
@@ -168,6 +184,8 @@ class MainWindow(QMainWindow):
         tb.addSeparator()
         for a in self.tools.values():
             tb.addAction(a)
+        tb.addSeparator()
+        tb.addActions([self.act_rot_left, self.act_rot_right, self.act_delete_pages])
         spacer = QWidget(tb)
         spacer.setSizePolicy(spacer.sizePolicy().Policy.Expanding, spacer.sizePolicy().Policy.Preferred)
         tb.addWidget(spacer)
@@ -193,6 +211,10 @@ class MainWindow(QMainWindow):
         m.addActions([self.act_zoom_in, self.act_zoom_out, self.act_fit, self.act_actual])
         m.addSeparator()
         m.addAction(self.act_sidebar)
+        m = mb.addMenu("&Páginas")
+        m.addActions([self.act_rot_left, self.act_rot_right])
+        m.addSeparator()
+        m.addAction(self.act_delete_pages)
         m = mb.addMenu("&Herramientas")
         m.addActions(list(self.tools.values()))
 
@@ -358,6 +380,9 @@ class MainWindow(QMainWindow):
 
     def editor_changed(self, overlay: TextEditorOverlay | None, mode: str) -> None:
         self.format_bar.attach(overlay)
+        # Mientras se escribe, sus atajos (Ctrl+L/R, Supr) no deben tocar las páginas.
+        for a in (self.act_rot_left, self.act_rot_right, self.act_delete_pages):
+            a.setEnabled(overlay is None and self.doc is not None)
         if overlay is not None and mode == "edit" and self.edit_tool.para is not None:
             self.format_bar.show_alignment(self.edit_tool.para.align)
 
@@ -371,11 +396,66 @@ class MainWindow(QMainWindow):
         self.history.redo()
 
     def _on_history_changed(self) -> None:
-        # Cualquier paso del historial puede haber cambiado el documento.
+        # Cualquier paso del historial puede haber cambiado el documento (texto
+        # o estructura): la vista decide si basta re-renderizar o hay que rehacerla.
         if self.doc is not None:
-            self.view.invalidate_all()
+            self.view.sync()
             self.thumbs.refresh()
         self._update_state()
+
+    # ---------------------------------------------------------------- páginas
+    def _target_pages(self, pages: list[int] | None) -> list[int]:
+        if pages:
+            return pages
+        sel = self.thumbs.selected_pages()
+        return sel or ([self.view.current_page] if self.view.current_page >= 0 else [])
+
+    def _run_page_command(self, cmd: SnapshotCommand[object]) -> bool:
+        self._finish_editing(commit=True)
+        try:
+            self.history.push(cmd)
+        except XpdfError as err:
+            self._error("No se pudo modificar las páginas", str(err))
+            return False
+        except Exception:
+            log.exception("Error en %s", cmd.label)
+            self._error("No se pudo modificar las páginas", "Ha ocurrido un error inesperado; el documento no se ha modificado.")
+            return False
+        return True
+
+    def rotate_pages(self, degrees: int, pages: list[int] | None = None) -> None:
+        if self.doc is None:
+            return
+        sel = self._target_pages(pages)
+        if sel and self._run_page_command(rotate_command(self.doc, sel, degrees)):  # type: ignore[arg-type]
+            self.thumbs.select_pages(sel)
+
+    def delete_pages(self, pages: list[int] | None = None) -> None:
+        if self.doc is None:
+            return
+        sel = self._target_pages(pages)
+        if not sel:
+            return
+        if self._run_page_command(delete_command(self.doc, sel)):  # type: ignore[arg-type]
+            n = len(sel)
+            self.show_status(
+                f"{'Página borrada' if n == 1 else f'{n} páginas borradas'} · Deshacer: "
+                + self.act_undo.shortcut().toString(QKeySequence.SequenceFormat.NativeText),
+                6000,
+            )
+            keep = min(sel[0], self.doc.page_count - 1)
+            self.thumbs.select_pages([keep])
+            self.view.scroll_to_page(keep)
+
+    def move_pages(self, pages: list[int], target: int) -> None:
+        if self.doc is None or not pages:
+            return
+        cmd = move_command(self.doc, pages, target)
+        if self._run_page_command(cmd):  # type: ignore[arg-type]
+            moved = cmd.result or []
+            self.thumbs.select_pages(moved)
+            if moved:
+                self.view.scroll_to_page(moved[0])
 
     def optimize(self) -> None:
         if self.doc is None:
@@ -390,6 +470,7 @@ class MainWindow(QMainWindow):
             self.act_save, self.act_save_as, self.act_optimize, self.act_zoom_in,
             self.act_zoom_out, self.act_fit, self.act_actual,
             self.tools["edit_text"], self.tools["add_text"],
+            self.act_rot_left, self.act_rot_right, self.act_delete_pages,
         ):
             a.setEnabled(has_doc)
         self.act_undo.setEnabled(self.history.can_undo)

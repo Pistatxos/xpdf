@@ -4,9 +4,22 @@ from __future__ import annotations
 
 import time
 
-from PySide6.QtCore import QRectF, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
-from PySide6.QtWidgets import QAbstractItemView, QListWidget, QListWidgetItem, QWidget
+from PySide6.QtCore import QItemSelectionModel, QPoint, QRectF, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import (
+    QAction,
+    QColor,
+    QContextMenuEvent,
+    QDragMoveEvent,
+    QDropEvent,
+    QIcon,
+    QKeyEvent,
+    QPainter,
+    QPaintEvent,
+    QPalette,
+    QPen,
+    QPixmap,
+)
+from PySide6.QtWidgets import QAbstractItemView, QListWidget, QListWidgetItem, QMenu, QWidget
 
 from xpdf.core.document import Document
 from xpdf.ui.qt_image import to_qimage
@@ -19,6 +32,11 @@ BATCH_BUDGET_S = 0.025
 
 class ThumbnailPanel(QListWidget):
     pageActivated = Signal(int)
+    #: (páginas seleccionadas, posición destino 0..n) al soltar un arrastre
+    pagesMoved = Signal(list, int)
+    deleteRequested = Signal(list)
+    #: (páginas, grados: -90 o 90)
+    rotateRequested = Signal(list, int)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -34,6 +52,13 @@ class ThumbnailPanel(QListWidget):
         self.setUniformItemSizes(True)
         self.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        # Reordenar arrastrando. El soltar lo resuelve la ventana (comando con
+        # deshacer); la lista no mueve sus elementos por su cuenta.
+        self.setDragEnabled(True)
+        self.setAcceptDrops(True)
+        self.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
+        self.setDefaultDropAction(Qt.DropAction.MoveAction)
+        self._drop_target: int | None = None
         self.setMinimumWidth(THUMB_W + 40)
         self.setFrameShape(QListWidget.Shape.NoFrame)
 
@@ -79,6 +104,105 @@ class ThumbnailPanel(QListWidget):
 
     def selected_pages(self) -> list[int]:
         return sorted(self.row(it) for it in self.selectedItems())
+
+    def select_pages(self, pages: list[int]) -> None:
+        self.blockSignals(True)
+        self.clearSelection()
+        for i in pages:
+            item = self.item(i)
+            if item is not None:
+                item.setSelected(True)
+        first = self.item(pages[0]) if pages else None
+        if first is not None:
+            self.setCurrentItem(first, QItemSelectionModel.SelectionFlag.NoUpdate)
+            self.scrollToItem(first)
+        self.blockSignals(False)
+
+    # ------------------------------------------------------- arrastrar/soltar
+    def _target_at(self, pos: QPoint) -> int:
+        """Posición de destino (0..n) para un punto del área visible."""
+        item = self.itemAt(pos)
+        if item is None:
+            if self.count() and pos.y() < self.visualItemRect(self.item(0)).top():
+                return 0
+            return self.count()
+        rect = self.visualItemRect(item)
+        row = self.row(item)
+        return row + 1 if pos.y() > rect.center().y() else row
+
+    def dragMoveEvent(self, event: QDragMoveEvent) -> None:
+        if event.source() is not self:
+            event.ignore()
+            return
+        self._drop_target = self._target_at(event.position().toPoint())
+        self.viewport().update()
+        event.setDropAction(Qt.DropAction.MoveAction)
+        event.accept()
+
+    def dragLeaveEvent(self, event: object) -> None:
+        self._drop_target = None
+        self.viewport().update()
+
+    def dropEvent(self, event: QDropEvent) -> None:
+        target = self._target_at(event.position().toPoint())
+        self._drop_target = None
+        self.viewport().update()
+        pages = self.selected_pages()
+        # La lista no debe mover nada: se ignora la acción y se avisa a la ventana.
+        event.setDropAction(Qt.DropAction.IgnoreAction)
+        event.accept()
+        if pages:
+            self.pagesMoved.emit(pages, target)
+
+    def paintEvent(self, event: QPaintEvent) -> None:
+        super().paintEvent(event)
+        if self._drop_target is None or not self.count():
+            return
+        if self._drop_target < self.count():
+            y = self.visualItemRect(self.item(self._drop_target)).top() - self.spacing() / 2
+        else:
+            y = self.visualItemRect(self.item(self.count() - 1)).bottom() + self.spacing() / 2
+        p = QPainter(self.viewport())
+        p.setPen(QPen(self.palette().color(QPalette.ColorRole.Highlight), 3))
+        p.drawLine(8, round(y), self.viewport().width() - 8, round(y))
+        p.end()
+
+    # ------------------------------------------------------------ menú y teclas
+    def _pages_for_action(self) -> list[int]:
+        pages = self.selected_pages()
+        if not pages and self.currentRow() >= 0:
+            pages = [self.currentRow()]
+        return pages
+
+    def contextMenuEvent(self, event: QContextMenuEvent) -> None:
+        item = self.itemAt(event.pos())
+        if item is not None and not item.isSelected():
+            self.select_pages([self.row(item)])
+        pages = self._pages_for_action()
+        if not pages:
+            return
+        n = len(pages)
+        label = "la página" if n == 1 else f"{n} páginas"
+        menu = QMenu(self)
+        left = QAction(f"Girar {label} a la izquierda", menu)
+        right = QAction(f"Girar {label} a la derecha", menu)
+        delete = QAction(f"Borrar {label}", menu)
+        left.triggered.connect(lambda: self.rotateRequested.emit(pages, -90))
+        right.triggered.connect(lambda: self.rotateRequested.emit(pages, 90))
+        delete.triggered.connect(lambda: self.deleteRequested.emit(pages))
+        menu.addActions([left, right])
+        menu.addSeparator()
+        menu.addAction(delete)
+        menu.exec(event.globalPos())
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        if event.key() in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
+            pages = self._pages_for_action()
+            if pages:
+                self.deleteRequested.emit(pages)
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
     # ------------------------------------------------------------------ interno
     def _on_clicked(self, item: QListWidgetItem) -> None:

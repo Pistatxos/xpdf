@@ -3,9 +3,9 @@
 Editor de PDF de escritorio, minimalista, gratuito y de código abierto (AGPL-3.0).
 Hecho con Python 3.12, PySide6 y PyMuPDF.
 
-> Estado: **fase 2** — visualizar, editar texto existente, añadir texto,
-> deshacer/rehacer, guardar (sin engordar el archivo) y «Reducir tamaño…».
-> Páginas e imágenes llegan en las fases 3 y 4.
+> Estado: **fase 3** — visualizar, editar y añadir texto, operaciones de
+> páginas, deshacer/rehacer, guardar (sin engordar el archivo) y «Reducir
+> tamaño…». Las imágenes llegan en la fase 4.
 
 ## Edición de texto
 
@@ -22,6 +22,15 @@ Hecho con Python 3.12, PySide6 y PyMuPDF.
   ella. Solo los caracteres que no existen en esa fuente recortada usan otra: la
   misma instalada en el sistema o la más parecida incluida (Liberation). La
   barra de estado avisa de qué caracteres se han sustituido.
+
+## Páginas
+
+- Selecciona una o varias miniaturas (Ctrl/Cmd o Mayús + clic).
+- **Reordenar**: arrastra las miniaturas; una línea indica dónde caerán.
+- **Girar**: Ctrl/Cmd+L (izquierda) y Ctrl/Cmd+R (derecha), o el menú contextual.
+- **Borrar**: Supr en las miniaturas, el icono de la papelera o el menú «Páginas».
+- Se conservan formularios, marcadores y enlaces internos (siguen apuntando a
+  la misma página tras reordenar). Todo se puede deshacer.
 
 ### Limitaciones conocidas
 
@@ -65,6 +74,7 @@ src/xpdf/
 │   ├── layout.py   composición propia (partición, justificado, escritura)
 │   ├── fonts.py    elección de fuentes y comprobación de glifos
 │   ├── pdffonts.py escritura con las fuentes originales del PDF
+│   ├── pages.py    borrar, girar y reordenar páginas
 │   ├── optimize.py «Reducir tamaño…»
 │   └── editing.py  fachada para la UI
 └── ui/             interfaz PySide6 — nunca importa pymupdf

@@ -167,7 +167,23 @@ class PageView(QGraphicsView):
         self.set_document(self._doc)
         if not fit:
             self.set_zoom(zoom)
-        self.scroll_to_page(min(page, len(self._pages) - 1))
+        self.scroll_to_page(max(0, min(page, len(self._pages) - 1)))
+
+    def sync(self) -> None:
+        """Tras un cambio del documento: si cambió el número o el tamaño de las
+        páginas (borrar, girar, reordenar...) se rehace la escena; si no, solo se
+        vuelve a renderizar (y no se mueve el desplazamiento)."""
+        if self._doc is None:
+            return
+        same = self._doc.page_count == len(self._pages) and all(
+            abs(self._doc.page_size(i).width - it.boundingRect().width()) < 0.01
+            and abs(self._doc.page_size(i).height - it.boundingRect().height()) < 0.01
+            for i, it in enumerate(self._pages)
+        )
+        if same:
+            self.invalidate_all()
+        else:
+            self.reload()
 
     def invalidate_page(self, index: int) -> None:
         """Fuerza a re-renderizar una página (tras editarla)."""
