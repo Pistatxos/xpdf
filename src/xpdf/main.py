@@ -74,7 +74,8 @@ def main() -> int:
         # Windows agrupa por este identificador en la barra de tareas (y usa su icono).
         import ctypes
 
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("xpdf.xpdf")  # type: ignore[attr-defined]
+        # getattr: «windll» solo existe en Windows (así mypy acepta el código en todas).
+        getattr(ctypes, "windll").shell32.SetCurrentProcessExplicitAppUserModelID("xpdf.xpdf")
     if sys.platform == "win32" and app.style().name().lower() == "windowsvista":
         # El estilo clásico de Windows no tiene modo oscuro; Fusion sí sigue al sistema.
         app.setStyle("Fusion")
