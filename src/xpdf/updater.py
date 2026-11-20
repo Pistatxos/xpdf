@@ -48,6 +48,27 @@ class UpdateError(XpdfError):
     """Fallo al buscar o instalar una actualización (mensaje para el usuario)."""
 
 
+class BlockedBySystemError(UpdateError):
+    """Windows impidió ejecutar el instalador (Control inteligente de aplicaciones).
+
+    Pasa con instaladores sin firma digital: el sistema decide por la reputación
+    de cada archivo y no permite excepciones para uno concreto.
+    """
+
+
+#: WinError de «Una directiva de Control de aplicaciones bloqueó este archivo».
+_WINERROR_APP_CONTROL = 4551
+
+
+def install_command(repo: str = GITHUB_REPO) -> str:
+    """Orden de PowerShell que instala o actualiza xpdf (la del README)."""
+    return f"irm https://raw.githubusercontent.com/{repo}/main/scripts/install.ps1 | iex"
+
+
+def releases_url(repo: str = GITHUB_REPO) -> str:
+    return f"https://github.com/{repo}/releases/latest"
+
+
 @dataclass(frozen=True, slots=True)
 class Release:
     version: str
@@ -215,11 +236,20 @@ def apply_update(package: Path) -> None:
     """Lanza la instalación en segundo plano. Después, la app debe cerrarse."""
     if sys.platform == "win32":
         flags = 0x00000008 | 0x00000200  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
-        subprocess.Popen(  # noqa: S603 - instalador verificado por SHA-256
-            [str(package), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS", "/RELAUNCH=1"],
-            creationflags=flags,
-            close_fds=True,
-        )
+        try:
+            subprocess.Popen(  # noqa: S603 - instalador verificado por SHA-256
+                [str(package), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS", "/RELAUNCH=1"],
+                creationflags=flags,
+                close_fds=True,
+            )
+        except OSError as exc:
+            log.warning("No se pudo lanzar el instalador %s: %s", package, exc)
+            if getattr(exc, "winerror", None) == _WINERROR_APP_CONTROL:
+                raise BlockedBySystemError(
+                    "Windows ha bloqueado el instalador de la actualización "
+                    "(Control inteligente de aplicaciones), porque aún no está firmado digitalmente."
+                ) from exc
+            raise UpdateError("No se pudo iniciar el instalador de la actualización.") from exc
         return
     if sys.platform == "darwin":
         bundle = installed_bundle()

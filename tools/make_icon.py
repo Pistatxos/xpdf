@@ -12,55 +12,79 @@ import sys
 import tempfile
 from pathlib import Path
 
-from PySide6.QtCore import QBuffer, QIODevice, QRectF, Qt
-from PySide6.QtGui import QBrush, QColor, QGuiApplication, QImage, QLinearGradient, QPainter, QPainterPath, QPen
+from PySide6.QtCore import QBuffer, QIODevice, QPointF, QRectF, Qt
+from PySide6.QtGui import (
+    QBrush,
+    QColor,
+    QFont,
+    QFontDatabase,
+    QFontMetricsF,
+    QGuiApplication,
+    QImage,
+    QLinearGradient,
+    QPainter,
+    QPainterPath,
+)
 
 OUT = Path(__file__).resolve().parents[1] / "assets" / "icons"
 
 
-def draw(size: int) -> QImage:
+#: Tipografía del logotipo (Inter Black, SIL OFL; ver tools/fonts/LICENSE-Inter.txt).
+#: Solo se usa para generar el icono: no se incluye en la aplicación.
+FONT = Path(__file__).resolve().parent / "fonts" / "Inter-Black.ttf"
+BLUE1, BLUE2, ORANGE = QColor("#3b82f6"), QColor("#4338ca"), QColor("#f97316")
+#: Por debajo de este tamaño (px lógicos) solo se dibuja la «x»: «xpdf» no se leería.
+SMALL = 48
+_family: str | None = None
+
+
+def _font(px: int) -> QFont:
+    global _family
+    if _family is None:
+        fid = QFontDatabase.addApplicationFont(str(FONT))
+        if fid < 0:
+            raise SystemExit(f"No se pudo cargar {FONT}")
+        _family = QFontDatabase.applicationFontFamilies(fid)[0]
+    f = QFont(_family)
+    f.setPixelSize(px)
+    return f
+
+
+def draw(size: int, small: bool | None = None) -> QImage:
+    """Logo: «xpdf» con la x naranja sobre azul; en tamaños pequeños, solo la x."""
+    if small is None:
+        small = size <= SMALL
     img = QImage(size, size, QImage.Format.Format_ARGB32)
     img.fill(Qt.GlobalColor.transparent)
     p = QPainter(img)
     p.setRenderHint(QPainter.RenderHint.Antialiasing)
-    s = size / 1024.0
-    p.scale(s, s)
+    p.setRenderHint(QPainter.RenderHint.TextAntialiasing)
+    p.scale(size / 1024.0, size / 1024.0)
 
-    # Fondo: cuadrado redondeado (margen como los iconos de macOS) con degradado.
     bg = QRectF(100, 100, 824, 824)
     grad = QLinearGradient(bg.topLeft(), bg.bottomRight())
-    grad.setColorAt(0, QColor("#3b82f6"))
-    grad.setColorAt(1, QColor("#4338ca"))
+    grad.setColorAt(0, BLUE1)
+    grad.setColorAt(1, BLUE2)
     path = QPainterPath()
     path.addRoundedRect(bg, 185, 185)
     p.fillPath(path, QBrush(grad))
 
-    # Hoja con la esquina doblada.
-    x0, y0, x1, y1, fold = 300.0, 210.0, 724.0, 814.0, 130.0
-    page = QPainterPath()
-    page.moveTo(x0, y0)
-    page.lineTo(x1 - fold, y0)
-    page.lineTo(x1, y0 + fold)
-    page.lineTo(x1, y1)
-    page.lineTo(x0, y1)
-    page.closeSubpath()
-    p.fillPath(page, QColor("#ffffff"))
-    corner = QPainterPath()
-    corner.moveTo(x1 - fold, y0)
-    corner.lineTo(x1 - fold, y0 + fold)
-    corner.lineTo(x1, y0 + fold)
-    corner.closeSubpath()
-    p.fillPath(corner, QColor("#c7d2fe"))
-
-    # Líneas de texto.
-    p.setPen(Qt.PenStyle.NoPen)
-    p.setBrush(QColor("#94a3b8"))
-    for i, w in enumerate((330, 300, 330, 190)):
-        y = 400 + i * 95
-        p.drawRoundedRect(QRectF(360, y, w if i != 1 else 200, 38), 19, 19)
-    # Cursor de texto (edición) tras la segunda línea.
-    p.setBrush(QColor("#f97316"))
-    p.drawRoundedRect(QRectF(585, 470, 30, 115), 12, 12)
+    if small:
+        p.setFont(_font(680))
+        p.setPen(QColor("white"))
+        p.drawText(QRectF(100, 60, 824, 824), Qt.AlignmentFlag.AlignCenter, "x")
+    else:
+        f = _font(270)
+        f.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, -8)
+        p.setFont(f)
+        fm = QFontMetricsF(f)
+        wx, wp = fm.horizontalAdvance("x"), fm.horizontalAdvance("pdf")
+        x0 = 512 - (wx + wp) / 2
+        baseline = 512 + fm.capHeight() / 2
+        p.setPen(ORANGE)
+        p.drawText(QPointF(x0, baseline), "x")
+        p.setPen(QColor("white"))
+        p.drawText(QPointF(x0 + wx, baseline), "pdf")
     p.end()
     return img
 
@@ -94,8 +118,9 @@ def write_icns(path: Path) -> bool:
         iconset = Path(tmp) / "app.iconset"
         iconset.mkdir()
         for sz in (16, 32, 128, 256, 512):
-            draw(sz).save(str(iconset / f"icon_{sz}x{sz}.png"))
-            draw(sz * 2).save(str(iconset / f"icon_{sz}x{sz}@2x.png"))
+            small = sz <= SMALL  # el @2x de un tamaño pequeño sigue siendo pequeño
+            draw(sz, small).save(str(iconset / f"icon_{sz}x{sz}.png"))
+            draw(sz * 2, small).save(str(iconset / f"icon_{sz}x{sz}@2x.png"))
         subprocess.run(["iconutil", "-c", "icns", str(iconset), "-o", str(path)], check=True)
     return True
 
@@ -104,6 +129,7 @@ def main() -> int:
     QGuiApplication(sys.argv[:1])
     OUT.mkdir(parents=True, exist_ok=True)
     draw(1024).save(str(OUT / "app.png"))
+    draw(256, small=True).save(str(OUT / "app-small.png"))  # icono de ventana en tamaños pequeños
     write_ico(OUT / "app.ico", (16, 24, 32, 48, 64, 128, 256))
     if not write_icns(OUT / "app.icns"):
         print("Aviso: sin iconutil (no es macOS); app.icns no se ha regenerado")

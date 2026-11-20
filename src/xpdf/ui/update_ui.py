@@ -11,7 +11,7 @@ from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QApplication, QMessageBox, QProgressDialog, QWidget
 
 from xpdf import GITHUB_REPO, __version__, updater
-from xpdf.updater import Release, UpdateError
+from xpdf.updater import BlockedBySystemError, Release, UpdateError
 
 log = logging.getLogger(__name__)
 
@@ -193,6 +193,10 @@ class UpdateController(QObject):
         dlg.setLabelText("Instalando…")
         try:
             updater.apply_update(path)  # type: ignore[arg-type]
+        except BlockedBySystemError as err:
+            dlg.close()
+            self._blocked_help(str(err))
+            return
         except UpdateError as err:
             dlg.close()
             QMessageBox.warning(self.window, "Actualización", str(err))
@@ -200,6 +204,26 @@ class UpdateController(QObject):
         dlg.close()
         log.info("Actualización lanzada; cerrando xpdf")
         QApplication.quit()
+
+
+    def _blocked_help(self, reason: str) -> None:
+        """Windows bloqueó el instalador: explica y ofrece las alternativas."""
+        box = QMessageBox(self.window)
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setWindowTitle("Actualización bloqueada por Windows")
+        box.setText(reason)
+        box.setInformativeText(
+            "Puedes actualizar igualmente pegando esta línea en PowerShell "
+            "(menú Inicio → «PowerShell»):\n\n" + updater.install_command()
+        )
+        copy = box.addButton("Copiar la línea", QMessageBox.ButtonRole.AcceptRole)
+        web = box.addButton("Abrir la página de descargas", QMessageBox.ButtonRole.ActionRole)
+        box.addButton("Cerrar", QMessageBox.ButtonRole.RejectRole)
+        box.exec()
+        if box.clickedButton() is copy:
+            QApplication.clipboard().setText(updater.install_command())
+        elif box.clickedButton() is web:
+            QDesktopServices.openUrl(QUrl(updater.releases_url()))
 
 
 def show_about(parent: QWidget) -> None:

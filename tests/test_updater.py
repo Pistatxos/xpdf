@@ -110,3 +110,29 @@ def test_macos_script_waits_replaces_and_reopens(tmp_path: Path) -> None:
 
 def test_not_self_updating_in_development() -> None:
     assert not updater.can_self_update()
+
+
+def test_windows_app_control_block_is_reported_clearly(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """WinError 4551 (Control inteligente de aplicaciones) no debe ser un «error inesperado»."""
+    monkeypatch.setattr(updater.sys, "platform", "win32")
+
+    def blocked(*args: object, **kwargs: object) -> None:
+        err = OSError("bloqueado")
+        err.winerror = 4551  # type: ignore[attr-defined]
+        raise err
+
+    monkeypatch.setattr(updater.subprocess, "Popen", blocked)
+    with pytest.raises(updater.BlockedBySystemError, match="Control inteligente"):
+        updater.apply_update(tmp_path / "setup.exe")
+
+    def other(*args: object, **kwargs: object) -> None:
+        raise OSError("otro fallo")
+
+    monkeypatch.setattr(updater.subprocess, "Popen", other)
+    with pytest.raises(UpdateError) as info:
+        updater.apply_update(tmp_path / "setup.exe")
+    assert not isinstance(info.value, updater.BlockedBySystemError)
+
+
+def test_install_command_uses_configured_repo() -> None:
+    assert updater.install_command("u/r") == "irm https://raw.githubusercontent.com/u/r/main/scripts/install.ps1 | iex"

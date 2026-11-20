@@ -8,7 +8,7 @@ import traceback
 from pathlib import Path
 from types import TracebackType
 
-from PySide6.QtCore import QEvent
+from PySide6.QtCore import QEvent, QSize
 from PySide6.QtGui import QFileOpenEvent, QIcon
 from PySide6.QtWidgets import QApplication, QMessageBox
 
@@ -69,7 +69,11 @@ def main() -> int:
     app.setApplicationName("xpdf")
     app.setOrganizationName("xpdf")
     app.setApplicationVersion(__version__)
-    app.setWindowIcon(QIcon(str(assets_dir() / "icons" / "app.png")))
+    # Dos dibujos: «xpdf» en grande y solo la «x» en tamaños pequeños (barra de título).
+    app_icon = QIcon(str(assets_dir() / "icons" / "app.png"))
+    app_icon.addFile(str(assets_dir() / "icons" / "app-small.png"), QSize(32, 32))
+    app_icon.addFile(str(assets_dir() / "icons" / "app-small.png"), QSize(16, 16))
+    app.setWindowIcon(app_icon)
     if sys.platform == "win32":
         # Windows agrupa por este identificador en la barra de tareas (y usa su icono).
         import ctypes
