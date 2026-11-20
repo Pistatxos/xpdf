@@ -5,12 +5,13 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QSettings, Qt
+from PySide6.QtCore import QEvent, QSettings, Qt, QTimer
 from PySide6.QtGui import (
     QAction,
     QActionGroup,
     QCloseEvent,
     QDragEnterEvent,
+    QDragLeaveEvent,
     QDropEvent,
     QKeySequence,
 )
@@ -20,6 +21,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QSplitter,
+    QStackedWidget,
     QToolBar,
     QWidget,
 )
@@ -30,6 +32,7 @@ from xpdf.core.editing import NewTextStyle, TextEditing, TextOutcome
 from xpdf.core.errors import XpdfError
 from xpdf.core.history import History
 from xpdf.core.pages import delete_command, move_command, rotate_command
+from xpdf.ui.drop_zone import DropOverlay, WelcomeView
 from xpdf.ui.format_bar import FormatBar
 from xpdf.ui.icons import icon
 from xpdf.ui.optimize_dialog import run_optimize_dialog
@@ -63,7 +66,17 @@ class MainWindow(QMainWindow):
         splitter.setStretchFactor(1, 1)
         splitter.setCollapsible(1, False)
         splitter.setSizes([170, 900])
-        self.setCentralWidget(splitter)
+        # Sin documento: zona de bienvenida «Arrastra aquí tu PDF»; con documento,
+        # miniaturas + página (y un aviso encima al arrastrar otro PDF).
+        self.welcome = WelcomeView(self)
+        self.welcome.openRequested.connect(self.open_dialog)
+        self.stack = QStackedWidget(self)
+        self.stack.addWidget(self.welcome)
+        self.stack.addWidget(splitter)
+        self.setCentralWidget(self.stack)
+        # Hijo del contenedor y no del splitter: QSplitter convierte en panel
+        # cualquier widget hijo suyo y el aviso le robaría espacio a la vista.
+        self.drop_overlay = DropOverlay(self.stack)
 
         self._build_actions()
         self._build_toolbar()
@@ -259,8 +272,13 @@ class MainWindow(QMainWindow):
         self._overwrite_ok = False
         self.history.clear()
         self._settings.setValue("paths/last_dir", str(Path(path).parent))
+        # Primero se muestra la vista del documento: si sigue oculta tras la
+        # bienvenida no tiene anchura y «ajustar al ancho» calcularía un zoom mínimo.
+        self.stack.setCurrentIndex(1)
         self.view.set_document(doc)
         self.thumbs.set_document(doc)
+        # Cuando el diseño ya ha dado su tamaño real a la vista, se reajusta.
+        QTimer.singleShot(0, self.view.refit)
         self._update_state()
         return True
 
@@ -479,6 +497,7 @@ class MainWindow(QMainWindow):
     # ---------------------------------------------------------------- estado
     def _update_state(self) -> None:
         has_doc = self.doc is not None
+        self.stack.setCurrentIndex(1 if has_doc else 0)
         for a in (
             self.act_save, self.act_save_as, self.act_optimize, self.act_zoom_in,
             self.act_zoom_out, self.act_fit, self.act_actual,
@@ -498,7 +517,7 @@ class MainWindow(QMainWindow):
             self.setWindowTitle("xpdf")
             self.setWindowFilePath("")
         if not has_doc:
-            self.page_label.setText("Arrastra un PDF aquí o pulsa Abrir")
+            self.page_label.setText("")
 
     def _on_zoom_changed(self, zoom: float) -> None:
         self.zoom_label.setText(f"{round(zoom * 100)} %")
@@ -523,10 +542,25 @@ class MainWindow(QMainWindow):
                     a.setIcon(icon(name))
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
-        if self._dropped_pdf(event) is not None:
-            event.acceptProposedAction()
+        path = self._dropped_pdf(event)
+        if path is None:
+            return
+        event.acceptProposedAction()
+        name = Path(path).name
+        if self.doc is None:
+            self.welcome.set_drag_active(True, name)
+        else:
+            self.drop_overlay.show_for(name)
+
+    def dragLeaveEvent(self, event: QDragLeaveEvent) -> None:
+        self._end_drag_feedback()
+
+    def _end_drag_feedback(self) -> None:
+        self.welcome.set_drag_active(False)
+        self.drop_overlay.hide()
 
     def dropEvent(self, event: QDropEvent) -> None:
+        self._end_drag_feedback()
         path = self._dropped_pdf(event)
         if path is not None and self._maybe_save():
             event.acceptProposedAction()

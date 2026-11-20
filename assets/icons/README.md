@@ -6,5 +6,6 @@
   Correspondencia: sidebar=panel-left, open=folder-open, save, undo=undo-2,
   redo=redo-2, select=mouse-pointer-2, edit-text=square-pen, add-text=type,
   image=image-plus, rotate-left=rotate-ccw, rotate-right=rotate-cw,
-  trash=trash-2, zoom-in, zoom-out, fit-width=move-horizontal.
+  trash=trash-2, zoom-in, zoom-out, fit-width=move-horizontal,
+  drop-file=file-up (trazo 1,5), file-open=file-text (trazo 1,5).
 - Icono de la aplicación (`app.*`): propio, generado con `tools/make_icon.py`.

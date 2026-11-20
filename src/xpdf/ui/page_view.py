@@ -212,6 +212,11 @@ class PageView(QGraphicsView):
         prev = next((z for z in reversed(ZOOM_STEPS) if z < self._zoom - 1e-3), MIN_ZOOM)
         self.set_zoom(prev)
 
+    def refit(self) -> None:
+        """Reaplica «ajustar al ancho» si está activo (p. ej. tras mostrarse la vista)."""
+        if self._fit_width:
+            self._apply_fit_width()
+
     def fit_width(self) -> None:
         self._fit_width = True
         self._apply_fit_width()
