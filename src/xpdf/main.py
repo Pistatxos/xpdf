@@ -5,15 +5,16 @@ from __future__ import annotations
 import logging
 import sys
 import traceback
+from pathlib import Path
 from types import TracebackType
 
 from PySide6.QtCore import QEvent
-from PySide6.QtGui import QFileOpenEvent
+from PySide6.QtGui import QFileOpenEvent, QIcon
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from xpdf import __version__
 from xpdf.logging_setup import setup_logging
-from xpdf.paths import log_file
+from xpdf.paths import assets_dir, log_file
 
 log = logging.getLogger("xpdf")
 
@@ -54,6 +55,11 @@ def _excepthook(
 
 
 def main() -> int:
+    for arg in sys.argv[1:]:
+        if arg.startswith("--selftest="):
+            from xpdf.selftest import run
+
+            return run(Path(arg.split("=", 1)[1]))
     debug = "--debug" in sys.argv
     setup_logging(debug)
     log.info("xpdf %s arrancando", __version__)
@@ -63,6 +69,12 @@ def main() -> int:
     app.setApplicationName("xpdf")
     app.setOrganizationName("xpdf")
     app.setApplicationVersion(__version__)
+    app.setWindowIcon(QIcon(str(assets_dir() / "icons" / "app.png")))
+    if sys.platform == "win32":
+        # Windows agrupa por este identificador en la barra de tareas (y usa su icono).
+        import ctypes
+
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("xpdf.xpdf")  # type: ignore[attr-defined]
     if sys.platform == "win32" and app.style().name().lower() == "windowsvista":
         # El estilo clásico de Windows no tiene modo oscuro; Fusion sí sigue al sistema.
         app.setStyle("Fusion")

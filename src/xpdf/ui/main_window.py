@@ -37,6 +37,7 @@ from xpdf.ui.page_view import PageView, ViewTool
 from xpdf.ui.text_editor import TextEditorOverlay
 from xpdf.ui.thumbnails import ThumbnailPanel
 from xpdf.ui.tools.text_tools import AddTextTool, EditTextTool
+from xpdf.ui.update_ui import UpdateController, show_about
 
 log = logging.getLogger(__name__)
 
@@ -78,6 +79,16 @@ class MainWindow(QMainWindow):
         self.format_bar.newStyleChanged.connect(self.add_tool.restyle)
         self.tool_group.triggered.connect(self._on_tool_changed)
 
+        self.updates = UpdateController(self, self._maybe_save)
+        m = self.menuBar().addMenu("A&yuda")
+        act = QAction("Buscar actualizaciones…", self)
+        act.triggered.connect(lambda: self.updates.check(interactive=True))
+        about = QAction("Acerca de xpdf", self)
+        about.setMenuRole(QAction.MenuRole.AboutRole)
+        about.triggered.connect(lambda: show_about(self))
+        m.addActions([act, about])
+        self.updates.schedule_startup_check()
+
         self.view.zoomChanged.connect(self._on_zoom_changed)
         self.view.currentPageChanged.connect(self._on_page_changed)
         self.thumbs.pageActivated.connect(self.view.scroll_to_page)
@@ -117,7 +128,8 @@ class MainWindow(QMainWindow):
         S = QKeySequence.StandardKey
         self.act_open = self._act("Abrir…", self.open_dialog, "open", [K(S.Open)])
         self.act_save = self._act("Guardar", self.save, "save", [K(S.Save)])
-        self.act_save_as = self._act("Guardar como…", self.save_as, None, [K(S.SaveAs)])
+        # SaveAs no tiene atajo estándar en Windows: se fija explícitamente.
+        self.act_save_as = self._act("Guardar como…", self.save_as, None, [K("Ctrl+Shift+S")])
         self.act_close = self._act("Cerrar", self.close, None, [K(S.Close)])
         self.act_undo = self._act("Deshacer", self.undo, "undo", [K(S.Undo)])
         redo_keys = [K("Ctrl+Shift+Z")]

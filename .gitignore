@@ -4,7 +4,7 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 dist/
-build/*/
-!build/*.spec
+build/
+packaging/windows/version_info.txt
 *.egg-info/
 .DS_Store
