@@ -33,8 +33,10 @@ OUT = Path(__file__).resolve().parents[1] / "assets" / "icons"
 #: Solo se usa para generar el icono: no se incluye en la aplicación.
 FONT = Path(__file__).resolve().parent / "fonts" / "Inter-Black.ttf"
 BLUE1, BLUE2, ORANGE = QColor("#3b82f6"), QColor("#4338ca"), QColor("#f97316")
-#: Por debajo de este tamaño (px lógicos) solo se dibuja la «x»: «xpdf» no se leería.
-SMALL = 48
+#: A este tamaño (px lógicos) o menos solo se dibuja la «x»: «xpdf» no se leería.
+SMALL = 24
+#: Hasta este tamaño el nombre se dibuja un poco más grande para que se lea.
+MEDIUM = 64
 _family: str | None = None
 
 
@@ -50,10 +52,16 @@ def _font(px: int) -> QFont:
     return f
 
 
-def draw(size: int, small: bool | None = None) -> QImage:
-    """Logo: «xpdf» con la x naranja sobre azul; en tamaños pequeños, solo la x."""
+def draw(size: int, small: bool | None = None, logical: int | None = None) -> QImage:
+    """Logo: «xpdf» con la x naranja sobre azul; en tamaños mínimos, solo la x.
+
+    `logical` es el tamaño en que se mostrará (un @2x de 32 se ve a 32): decide
+    el dibujo; `size` son los píxeles de la imagen.
+    """
+    logical = logical or size
     if small is None:
-        small = size <= SMALL
+        small = logical <= SMALL
+    scale = 1.12 if logical <= MEDIUM else 1.0
     img = QImage(size, size, QImage.Format.Format_ARGB32)
     img.fill(Qt.GlobalColor.transparent)
     p = QPainter(img)
@@ -74,8 +82,8 @@ def draw(size: int, small: bool | None = None) -> QImage:
         p.setPen(QColor("white"))
         p.drawText(QRectF(100, 60, 824, 824), Qt.AlignmentFlag.AlignCenter, "x")
     else:
-        f = _font(270)
-        f.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, -8)
+        f = _font(round(270 * scale))
+        f.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, -8 * scale)
         p.setFont(f)
         fm = QFontMetricsF(f)
         wx, wp = fm.horizontalAdvance("x"), fm.horizontalAdvance("pdf")
@@ -118,9 +126,9 @@ def write_icns(path: Path) -> bool:
         iconset = Path(tmp) / "app.iconset"
         iconset.mkdir()
         for sz in (16, 32, 128, 256, 512):
-            small = sz <= SMALL  # el @2x de un tamaño pequeño sigue siendo pequeño
-            draw(sz, small).save(str(iconset / f"icon_{sz}x{sz}.png"))
-            draw(sz * 2, small).save(str(iconset / f"icon_{sz}x{sz}@2x.png"))
+            # el @2x se ve al mismo tamaño lógico: mismo dibujo, más píxeles
+            draw(sz).save(str(iconset / f"icon_{sz}x{sz}.png"))
+            draw(sz * 2, logical=sz).save(str(iconset / f"icon_{sz}x{sz}@2x.png"))
         subprocess.run(["iconutil", "-c", "icns", str(iconset), "-o", str(path)], check=True)
     return True
 
@@ -129,7 +137,8 @@ def main() -> int:
     QGuiApplication(sys.argv[:1])
     OUT.mkdir(parents=True, exist_ok=True)
     draw(1024).save(str(OUT / "app.png"))
-    draw(256, small=True).save(str(OUT / "app-small.png"))  # icono de ventana en tamaños pequeños
+    draw(256, logical=16).save(str(OUT / "app-small.png"))  # icono de ventana a 16-24 px: solo la x
+    draw(256, logical=32).save(str(OUT / "app-medium.png"))  # 32-64 px: «xpdf» algo mayor
     write_ico(OUT / "app.ico", (16, 24, 32, 48, 64, 128, 256))
     if not write_icns(OUT / "app.icns"):
         print("Aviso: sin iconutil (no es macOS); app.icns no se ha regenerado")

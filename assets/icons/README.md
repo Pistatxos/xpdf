@@ -10,4 +10,4 @@
   drop-file=file-up (trazo 1,5), file-open=file-text (trazo 1,5).
 - Icono de la aplicación (`app.*`, `app-small.png`): propio, generado con
   `tools/make_icon.py` con la tipografía Inter Black (SIL OFL, en `tools/fonts/`,
-  solo para generarlo). En tamaños de 48 px o menos se dibuja solo la «x».
+  solo para generarlo). Desde 32 px se lee «xpdf»; a 24 px o menos, solo la «x».

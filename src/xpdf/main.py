@@ -69,9 +69,11 @@ def main() -> int:
     app.setApplicationName("xpdf")
     app.setOrganizationName("xpdf")
     app.setApplicationVersion(__version__)
-    # Dos dibujos: «xpdf» en grande y solo la «x» en tamaños pequeños (barra de título).
+    # «xpdf» en grande y medio; solo la «x» en tamaños mínimos (barra de título).
     app_icon = QIcon(str(assets_dir() / "icons" / "app.png"))
-    app_icon.addFile(str(assets_dir() / "icons" / "app-small.png"), QSize(32, 32))
+    app_icon.addFile(str(assets_dir() / "icons" / "app-medium.png"), QSize(64, 64))
+    app_icon.addFile(str(assets_dir() / "icons" / "app-medium.png"), QSize(32, 32))
+    app_icon.addFile(str(assets_dir() / "icons" / "app-small.png"), QSize(24, 24))
     app_icon.addFile(str(assets_dir() / "icons" / "app-small.png"), QSize(16, 16))
     app.setWindowIcon(app_icon)
     if sys.platform == "win32":
