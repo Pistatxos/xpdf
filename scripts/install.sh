@@ -1,7 +1,7 @@
 #!/bin/sh
 # Instalador de xpdf para macOS (Apple Silicon). Uso:
 #
-#   curl -fsSL https://raw.githubusercontent.com/TU-USUARIO/xpdf/main/scripts/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/Pistatxos/xpdf/main/scripts/install.sh | sh
 #
 # Descarga la última versión desde GitHub Releases, comprueba su SHA-256 contra
 # SHA256SUMS.txt y copia xpdf.app a /Applications (o a ~/Applications si no hay
@@ -9,7 +9,7 @@
 # Opcional: XPDF_VERSION=0.3.0 para una versión concreta.
 set -eu
 
-REPO="${XPDF_REPO:-TU-USUARIO/xpdf}"
+REPO="${XPDF_REPO:-Pistatxos/xpdf}"
 
 fail() { printf 'xpdf: %s\n' "$1" >&2; exit 1; }
 

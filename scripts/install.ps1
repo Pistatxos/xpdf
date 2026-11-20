@@ -1,6 +1,6 @@
 # Instalador de xpdf para Windows. Uso (en PowerShell):
 #
-#   irm https://raw.githubusercontent.com/TU-USUARIO/xpdf/main/scripts/install.ps1 | iex
+#   irm https://raw.githubusercontent.com/Pistatxos/xpdf/main/scripts/install.ps1 | iex
 #
 # Descarga la última versión desde GitHub Releases, comprueba su SHA-256 contra
 # SHA256SUMS.txt e instala para el usuario actual (sin administrador), con acceso
@@ -15,7 +15,7 @@
     $ProgressPreference = 'SilentlyContinue'   # Invoke-WebRequest es mucho más rápido así
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-    $Repo = if ($env:XPDF_REPO) { $env:XPDF_REPO } else { 'TU-USUARIO/xpdf' }
+    $Repo = if ($env:XPDF_REPO) { $env:XPDF_REPO } else { 'Pistatxos/xpdf' }
     $Headers = @{ 'User-Agent' = 'xpdf-installer' }
 
     if (-not [Environment]::Is64BitOperatingSystem) {

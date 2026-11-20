@@ -50,18 +50,18 @@ original sin preguntar.
 Abre **PowerShell** y pega:
 
 ```powershell
-irm https://raw.githubusercontent.com/TU-USUARIO/xpdf/main/scripts/install.ps1 | iex
+irm https://raw.githubusercontent.com/Pistatxos/xpdf/main/scripts/install.ps1 | iex
 ```
 
 Descarga la última versión, comprueba su huella SHA-256 y la instala en tu
 usuario (sin permisos de administrador), con acceso directo en el escritorio y
 en el menú Inicio. También puedes bajar el instalador desde
-[Releases](https://github.com/TU-USUARIO/xpdf/releases/latest).
+[Releases](https://github.com/Pistatxos/xpdf/releases/latest).
 
 ### macOS (Apple Silicon)
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/TU-USUARIO/xpdf/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/Pistatxos/xpdf/main/scripts/install.sh | sh
 ```
 
 ### Actualizaciones
