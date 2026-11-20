@@ -219,6 +219,9 @@ class MainWindow(QMainWindow):
         m.addAction(self.act_close)
         m = mb.addMenu("&Edición")
         m.addActions([self.act_undo, self.act_redo])
+        m.addSeparator()
+        # Las herramientas viven en Edición: es donde se buscan «editar» y «añadir texto».
+        m.addActions(list(self.tools.values()))
         m = mb.addMenu("&Ver")
         m.addActions([self.act_zoom_in, self.act_zoom_out, self.act_fit, self.act_actual])
         m.addSeparator()
@@ -227,8 +230,6 @@ class MainWindow(QMainWindow):
         m.addActions([self.act_rot_left, self.act_rot_right])
         m.addSeparator()
         m.addAction(self.act_delete_pages)
-        m = mb.addMenu("&Herramientas")
-        m.addActions(list(self.tools.values()))
 
     def _build_statusbar(self) -> None:
         self.page_label = QLabel("", self)

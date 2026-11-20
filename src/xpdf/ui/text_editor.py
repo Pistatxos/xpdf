@@ -20,6 +20,8 @@ from PySide6.QtGui import (
     QFontDatabase,
     QKeyEvent,
     QKeySequence,
+    QPainter,
+    QPainterPath,
     QPen,
     QTextBlockFormat,
     QTextCharFormat,
@@ -122,25 +124,57 @@ class _Edit(QTextEdit):
         super().focusOutEvent(e)
 
 
-_HANDLE_W = 5.0  # puntos
 _MIN_WIDTH = 24.0
 _ACCENT = QColor(0, 120, 215)
 
 
 class _Handle(QGraphicsRectItem):
-    """Tirador lateral para cambiar el ancho de la caja de texto."""
+    """Tirador lateral para cambiar el ancho de la caja de texto.
+
+    Se dibuja a tamaño fijo en pantalla (ignora el zoom) y con una zona para
+    agarrar más amplia que el dibujo, para que sea fácil de usar.
+    """
+
+    W, H = 10.0, 30.0  # píxeles de pantalla
+    GRAB = 8.0  # margen extra alrededor para agarrarlo
+
+    GAP = 4.0  # separación del borde de la caja, para no tapar el texto
 
     def __init__(self, overlay: TextEditorOverlay, side: str) -> None:
-        super().__init__(overlay)
+        # El dibujo queda fuera de la caja: a la izquierda o a la derecha del borde.
+        x = -self.GAP - self.W if side == "left" else self.GAP
+        super().__init__(QRectF(x, -self.H / 2, self.W, self.H), overlay)
         self.overlay = overlay
         self.side = side
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations, True)
         self.setBrush(QBrush(_ACCENT))
-        self.setPen(QPen(Qt.PenStyle.NoPen))
+        self.setPen(QPen(QColor(255, 255, 255), 1.5))
         self.setCursor(Qt.CursorShape.SizeHorCursor)
+        self.setAcceptHoverEvents(True)
         self.setZValue(2)
         self.setToolTip("Arrastra para cambiar el ancho del texto")
         self._start_x = 0.0
         self._start_geom = (0.0, 0.0)
+
+    def boundingRect(self) -> QRectF:
+        g = self.GRAB
+        return self.rect().adjusted(-g, -g, g, g)
+
+    def shape(self) -> QPainterPath:
+        path = QPainterPath()
+        path.addRect(self.boundingRect())  # zona de agarre amplia
+        return path
+
+    def paint(self, painter: QPainter, option: object, widget: QWidget | None = None) -> None:
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setBrush(self.brush())
+        painter.setPen(self.pen())
+        painter.drawRoundedRect(self.rect(), self.W / 2, self.W / 2)
+        # dos rayitas de «agarre»
+        painter.setPen(QPen(QColor(255, 255, 255, 200), 1))
+        cx = self.rect().center().x()
+        for dx in (-1.5, 1.5):
+            painter.drawLine(QPointF(cx + dx, -6), QPointF(cx + dx, 6))
 
     def mousePressEvent(self, event: QGraphicsSceneMouseEvent) -> None:
         self._start_x = event.scenePos().x()
@@ -398,7 +432,6 @@ class TextEditorOverlay(QGraphicsProxyWidget):
         self.resize(self.edit.width(), h)
         w = float(self.edit.width())
         self._frame.setRect(QRectF(-1, -1, w + 2, h + 2))
-        hh = min(h, 18.0)
-        top = (h - hh) / 2
-        self._handles[0].setRect(QRectF(-1 - _HANDLE_W, top, _HANDLE_W, hh))
-        self._handles[1].setRect(QRectF(w + 1, top, _HANDLE_W, hh))
+        # Centrados en los bordes; su tamaño en pantalla es fijo (ignoran el zoom).
+        self._handles[0].setPos(-1, h / 2)
+        self._handles[1].setPos(w + 1, h / 2)
