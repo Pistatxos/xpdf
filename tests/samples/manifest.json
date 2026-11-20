@@ -1,0 +1,388 @@
+{
+  "_comment": "Corpus manifest. Read by tests/conftest.py (fixture `samples`) and tests/samples/make_samples.py. 'pages' = 0-based page indices kept from the original download. 'min_words' = minimum words per kept page that get_text('words') must return (0 = page is allowed to have no text).",
+  "samples": [
+    {
+      "file": "word_court_opinion_justified.pdf",
+      "category": "word",
+      "origin": "real",
+      "tags": [
+        "word",
+        "justified",
+        "bold-italic-runs",
+        "truetype",
+        "embedded-subset",
+        "winansi",
+        "header-stamp",
+        "footnotes",
+        "small-caps-font"
+      ],
+      "source_url": "https://www.ca5.uscourts.gov/Opinions/pub/23/23-50697-CV0.pdf",
+      "license": "Public domain (US federal court opinion, 17 U.S.C. 105)",
+      "pages": [
+        0,
+        4
+      ],
+      "min_words": [
+        100,
+        200
+      ]
+    },
+    {
+      "file": "word_omb_memo.pdf",
+      "category": "word",
+      "origin": "real",
+      "tags": [
+        "word",
+        "ragged-right",
+        "bold-italic-runs",
+        "lists",
+        "footnotes",
+        "truetype",
+        "cid-identity-h",
+        "non-embedded",
+        "calibri",
+        "times",
+        "arial",
+        "image"
+      ],
+      "source_url": "https://www.whitehouse.gov/wp-content/uploads/2024/03/M-24-10-Advancing-Governance-Innovation-and-Risk-Management-for-Agency-Use-of-Artificial-Intelligence.pdf",
+      "license": "Public domain (US federal government work, 17 U.S.C. 105)",
+      "pages": [
+        0,
+        1,
+        3
+      ],
+      "min_words": [
+        200,
+        300,
+        300
+      ]
+    },
+    {
+      "file": "word365_aptos_math.pdf",
+      "category": "word",
+      "origin": "real",
+      "tags": [
+        "word",
+        "aptos",
+        "cambria-math",
+        "cid-identity-h",
+        "truetype",
+        "math"
+      ],
+      "source_url": "https://github.com/mozilla/pdf.js/blob/master/test/pdfs/bug1937438_from_word.pdf",
+      "license": "pdf.js test corpus (Apache-2.0 repository)",
+      "pages": [
+        0
+      ],
+      "min_words": [
+        5
+      ]
+    },
+    {
+      "file": "latex_revtex_twocol.pdf",
+      "category": "latex",
+      "origin": "real",
+      "tags": [
+        "latex",
+        "pdftex",
+        "type1",
+        "computer-modern",
+        "two-columns",
+        "math",
+        "ligatures",
+        "hyphenation",
+        "arxiv-stamp",
+        "vertical-text"
+      ],
+      "source_url": "https://arxiv.org/abs/2611.21676",
+      "license": "CC BY 4.0 (Zhang, Xu, Fu, Wu: 'Renormalization-Group Foundation of Critical Modes in Correlation Matrices')",
+      "pages": [
+        0,
+        1
+      ],
+      "min_words": [
+        400,
+        400
+      ]
+    },
+    {
+      "file": "latex_lualatex_stix.pdf",
+      "category": "latex",
+      "origin": "real",
+      "tags": [
+        "latex",
+        "luatex",
+        "opentype-cff",
+        "cid-identity-h",
+        "math",
+        "unicode-math"
+      ],
+      "source_url": "https://github.com/mozilla/pdf.js/blob/master/test/pdfs/bug1937438_af_from_latex.pdf",
+      "license": "pdf.js test corpus (Apache-2.0 repository)",
+      "pages": [
+        0
+      ],
+      "min_words": [
+        10
+      ]
+    },
+    {
+      "file": "scan_ocr_omb_memo.pdf",
+      "category": "scan-ocr",
+      "origin": "real",
+      "tags": [
+        "scan",
+        "ocr",
+        "render-mode-3",
+        "image",
+        "jpeg",
+        "non-embedded",
+        "ocr-errors"
+      ],
+      "source_url": "https://www.whitehouse.gov/wp-content/uploads/2025/02/M-25-22-Driving-Efficient-Acquisition-of-Artificial-Intelligence-in-Government.pdf",
+      "license": "Public domain (US federal government work, 17 U.S.C. 105)",
+      "pages": [
+        0
+      ],
+      "min_words": [
+        200
+      ]
+    },
+    {
+      "file": "form_irs_w9.pdf",
+      "category": "form",
+      "origin": "real",
+      "tags": [
+        "form",
+        "acroform",
+        "xfa-removed",
+        "cff",
+        "type1c",
+        "embedded-subset",
+        "checkbox",
+        "vertical-text"
+      ],
+      "source_url": "https://www.irs.gov/pub/irs-pdf/fw9.pdf",
+      "license": "Public domain (US federal government work, 17 U.S.C. 105)",
+      "pages": [
+        0
+      ],
+      "min_words": [
+        500
+      ]
+    },
+    {
+      "file": "nonlatin_greek_wikipedia.pdf",
+      "category": "non-latin",
+      "origin": "real",
+      "tags": [
+        "greek",
+        "chrome-skia",
+        "truetype",
+        "cid-identity-h",
+        "embedded-subset",
+        "links",
+        "image"
+      ],
+      "source_url": "https://el.wikipedia.org/wiki/Αθήνα (exported via https://el.wikipedia.org/api/rest_v1/page/pdf/Αθήνα)",
+      "license": "CC BY-SA 4.0 (Wikipedia contributors, article 'Αθήνα')",
+      "pages": [
+        20
+      ],
+      "min_words": [
+        300
+      ]
+    },
+    {
+      "file": "nonlatin_russian_wikipedia.pdf",
+      "category": "non-latin",
+      "origin": "real",
+      "tags": [
+        "cyrillic",
+        "chrome-skia",
+        "truetype",
+        "cid-identity-h",
+        "embedded-subset",
+        "links"
+      ],
+      "source_url": "https://ru.wikipedia.org/wiki/Байкал (exported via https://ru.wikipedia.org/api/rest_v1/page/pdf/Байкал)",
+      "license": "CC BY-SA 4.0 (Wikipedia contributors, article 'Байкал')",
+      "pages": [
+        13
+      ],
+      "min_words": [
+        150
+      ]
+    },
+    {
+      "file": "cjk_type3_japanese_wikipedia.pdf",
+      "category": "non-latin",
+      "origin": "real",
+      "tags": [
+        "cjk",
+        "japanese",
+        "type3",
+        "chrome-skia",
+        "image",
+        "links"
+      ],
+      "source_url": "https://ja.wikipedia.org/wiki/富士山 (exported via https://ja.wikipedia.org/api/rest_v1/page/pdf/富士山)",
+      "license": "CC BY-SA 4.0 (Wikipedia contributors, article '富士山')",
+      "pages": [
+        14
+      ],
+      "min_words": [
+        20
+      ]
+    },
+    {
+      "file": "arabic_cid_truetype.pdf",
+      "category": "non-latin",
+      "origin": "real",
+      "tags": [
+        "arabic",
+        "rtl",
+        "presentation-forms",
+        "truetype",
+        "cid-identity-h",
+        "embedded-subset"
+      ],
+      "source_url": "https://github.com/mozilla/pdf.js/blob/master/test/pdfs/ArabicCIDTrueType.pdf",
+      "license": "pdf.js test corpus (Apache-2.0 repository)",
+      "pages": [
+        0
+      ],
+      "min_words": [
+        10
+      ]
+    },
+    {
+      "file": "cjk_vertical_identity_v.pdf",
+      "category": "non-latin",
+      "origin": "real",
+      "tags": [
+        "cjk",
+        "japanese",
+        "vertical-writing",
+        "cid-identity-v",
+        "truetype",
+        "dvipdfmx"
+      ],
+      "source_url": "https://github.com/mozilla/pdf.js/blob/master/test/pdfs/vertical.pdf",
+      "license": "pdf.js test corpus (Apache-2.0 repository)",
+      "pages": [
+        0,
+        1,
+        2
+      ],
+      "min_words": [
+        1,
+        0,
+        0
+      ]
+    },
+    {
+      "file": "rotated_text_calc.pdf",
+      "category": "rotated",
+      "origin": "real",
+      "tags": [
+        "rotated-text",
+        "openoffice",
+        "truetype",
+        "embedded-subset",
+        "no-encoding"
+      ],
+      "source_url": "https://github.com/mozilla/pdf.js/blob/master/test/pdfs/rotated.pdf",
+      "license": "pdf.js test corpus (Apache-2.0 repository)",
+      "pages": [
+        0
+      ],
+      "min_words": [
+        5
+      ]
+    },
+    {
+      "file": "synth_styled_paragraphs.pdf",
+      "category": "synthetic-word-like",
+      "origin": "synthetic",
+      "tags": [
+        "justified",
+        "bold-italic-runs",
+        "lists",
+        "header-footer",
+        "ground-truth",
+        "base14"
+      ],
+      "source_url": "make_samples.py",
+      "license": "CC0 (generated)",
+      "pages": [
+        0
+      ],
+      "min_words": [
+        120
+      ]
+    },
+    {
+      "file": "synth_ocr_scan.pdf",
+      "category": "scan-ocr",
+      "origin": "synthetic",
+      "tags": [
+        "scan",
+        "ocr",
+        "render-mode-3",
+        "image",
+        "ground-truth"
+      ],
+      "source_url": "make_samples.py",
+      "license": "CC0 (generated)",
+      "pages": [
+        0
+      ],
+      "min_words": [
+        60
+      ]
+    },
+    {
+      "file": "synth_text_over_background.pdf",
+      "category": "background",
+      "origin": "synthetic",
+      "tags": [
+        "background-image",
+        "colored-shapes",
+        "embedded-font",
+        "ground-truth"
+      ],
+      "source_url": "make_samples.py",
+      "license": "CC0 (generated)",
+      "pages": [
+        0
+      ],
+      "min_words": [
+        45
+      ]
+    },
+    {
+      "file": "synth_rotated_pages.pdf",
+      "category": "rotated",
+      "origin": "synthetic",
+      "tags": [
+        "page-rotation",
+        "ground-truth",
+        "base14"
+      ],
+      "source_url": "make_samples.py",
+      "license": "CC0 (generated)",
+      "pages": [
+        0,
+        1,
+        2
+      ],
+      "min_words": [
+        30,
+        30,
+        30
+      ]
+    }
+  ]
+}
