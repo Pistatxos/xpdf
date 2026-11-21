@@ -19,7 +19,8 @@ IS_WIN = sys.platform == "win32"
 a = Analysis(
     [str(ROOT / "src" / "xpdf" / "__main__.py")],
     pathex=[str(ROOT / "src")],
-    datas=[(str(ROOT / "assets"), "assets")],
+    # La ayuda de firmas se mantiene en docs/ (se lee en GitHub) y se incluye en la app.
+    datas=[(str(ROOT / "assets"), "assets"), (str(ROOT / "docs" / "firma.md"), "assets/help")],
     hiddenimports=["PySide6.QtSvg"],
     excludes=[
         "tkinter",

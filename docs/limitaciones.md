@@ -27,10 +27,14 @@ xpdf prefiere no dejarte editar algo a estropearlo. Te lo dice al hacer clic en:
 - El texto no rodea a las imágenes (un PDF no tiene flujo de texto): si hace
   falta hueco, estrecha el párrafo con los tiradores.
 - En macOS solo hay versión para Apple Silicon (M1 o posterior).
+- Firma digital: solo certificados en archivo (`.pfx`/`.p12`); no DNI
+  electrónico ni tarjetas. La firma no lleva sello de tiempo de un servidor
+  externo (la fecha es la del ordenador) y xpdf solo comprueba que el documento
+  no se ha alterado, no si el certificado es de una entidad de confianza.
 
 ## Privacidad
 
-xpdf funciona sin conexión. La única petición a Internet es la comprobación de
+xpdf funciona sin conexión (también al firmar y comprobar firmas). La única petición a Internet es la comprobación de
 actualizaciones (a GitHub), como mucho una vez al día. Sin telemetría y sin
 cuentas.
 

@@ -435,6 +435,9 @@ class AddImageTool(ViewTool):
         self.box: TransformBox | None = None
         self.drag: _Drag | None = None
         self._cursor = Qt.CursorShape.CrossCursor
+        #: Imagen ya elegida (p. ej. una firma dibujada): el siguiente clic la
+        #: coloca sin abrir el selector de archivos.
+        self.preset: Path | None = None
 
     def cursor(self) -> Qt.CursorShape:
         return self._cursor
@@ -479,6 +482,10 @@ class AddImageTool(ViewTool):
             return True
         if page < 0:
             return False
+        if self.preset is not None:
+            preset, self.preset = self.preset, None
+            self._start(page, pos, preset, max_frac=0.3)
+            return True
         path = choose_image(self.host.view, "Añadir imagen")
         if path is None:
             return True
@@ -502,7 +509,7 @@ class AddImageTool(ViewTool):
             return True
         return False
 
-    def _start(self, page: int, pos: QPointF, path: Path) -> None:
+    def _start(self, page: int, pos: QPointF, path: Path, max_frac: float = 0.4) -> None:
         item = self.host.view.page_item(page)
         pm = QPixmap(str(path))
         if item is None or pm.isNull():
@@ -512,9 +519,9 @@ class AddImageTool(ViewTool):
         page_w = item.boundingRect().width()
         w = pm.width() * 72 / 96
         h = pm.height() * 72 / 96
-        if w > 0.4 * page_w:
-            h *= 0.4 * page_w / w
-            w = 0.4 * page_w
+        if w > max_frac * page_w:
+            h *= max_frac * page_w / w
+            w = max_frac * page_w
         r = QRectF(pos.x() - w / 2, pos.y() - h / 2, w, h)
         self.page, self.path = page, path
         self.box = TransformBox(item)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -16,14 +17,17 @@ from PySide6.QtGui import (
     QDropEvent,
     QKeySequence,
 )
+from PySide6.QtWidgets import QApplication
 from PySide6.QtWidgets import (
     QFileDialog,
     QLabel,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QSplitter,
     QStackedWidget,
     QToolBar,
+    QToolButton,
     QWidget,
 )
 
@@ -33,6 +37,13 @@ from xpdf.core.editing import NewTextStyle, TextEditing, TextOutcome
 from xpdf.core.errors import XpdfError
 from xpdf.core.history import History
 from xpdf.core.pages import delete_command, move_command, rotate_command
+from xpdf.core.signatures import (
+    SignatureError,
+    SignatureStore,
+    is_signed,
+    sign_pdf,
+    signature_status,
+)
 from xpdf.ui.drop_zone import DropOverlay, WelcomeView
 from xpdf.ui.format_bar import FormatBar
 from xpdf.ui.icons import icon
@@ -40,8 +51,16 @@ from xpdf.ui.image_bar import ImageBar
 from xpdf.ui.optimize_dialog import run_optimize_dialog
 from xpdf.ui.page_view import PageView, ViewTool
 from xpdf.ui.text_editor import TextEditorOverlay
+from xpdf.ui.signatures_ui import (
+    SignaturesDialog,
+    SignDialog,
+    cert_text,
+    show_help,
+    show_signature_status,
+)
 from xpdf.ui.thumbnails import ThumbnailPanel
 from xpdf.ui.tools.image_tools import AddImageTool, ImageSelectTool
+from xpdf.ui.tools.sign_tools import SignAreaTool
 from xpdf.ui.tools.text_tools import AddTextTool, EditTextTool
 from xpdf.ui.update_ui import UpdateController, show_about
 
@@ -60,6 +79,12 @@ class MainWindow(QMainWindow):
         #: Si el usuario ya aceptó sobrescribir el original en esta sesión.
         self._overwrite_ok = False
         self._settings = QSettings()
+        #: El documento abierto tiene firmas digitales / el usuario ya aceptó modificarlo.
+        self._signed = False
+        self._signed_edit_ok = False
+        self.signatures = SignatureStore.load()
+        self._sign_cert_id: str | None = None
+        self._placing_signature = False
 
         self.view = PageView(self)
         self.thumbs = ThumbnailPanel(self)
@@ -94,6 +119,7 @@ class MainWindow(QMainWindow):
         self.add_tool = AddTextTool(self)
         self.select_tool = ImageSelectTool(self)
         self.image_tool = AddImageTool(self)
+        self.sign_tool = SignAreaTool(self)
         self.view.set_tool(self.select_tool)  # «Seleccionar» es la herramienta inicial
         self.image_bar = ImageBar(self.select_tool, self)
         self.addToolBar(Qt.ToolBarArea.TopToolBarArea, self.image_bar)
@@ -103,6 +129,10 @@ class MainWindow(QMainWindow):
 
         self.updates = UpdateController(self, self._maybe_save)
         m = self.menuBar().addMenu("A&yuda")
+        how = QAction("Cómo firmar documentos", self)
+        how.triggered.connect(lambda: show_help(self))
+        m.addAction(how)
+        m.addSeparator()
         act = QAction("Buscar actualizaciones…", self)
         act.triggered.connect(lambda: self.updates.check(interactive=True))
         about = QAction("Acerca de xpdf", self)
@@ -200,6 +230,17 @@ class MainWindow(QMainWindow):
         self.tools["select"].setChecked(True)
         self.tools["select"].setToolTip("Seleccionar: mover, redimensionar o borrar imágenes (V)")
         self.tools["image"].setToolTip("Añadir imagen (I)")
+        # «Firmar» también es una herramienta (dibujar el recuadro), pero se elige
+        # desde su menú: con qué certificado o qué rúbrica.
+        self.act_sign = QAction(icon("sign"), "Firmar", self)
+        self.act_sign.setData("sign")
+        self.act_sign.setCheckable(True)
+        self.act_sign.setToolTip("Firmar: certificado digital o firma dibujada")
+        self.tool_group.addAction(self.act_sign)
+        self.addAction(self.act_sign)
+        self.sign_menu = QMenu("Firmar", self)
+        self.sign_menu.aboutToShow.connect(lambda: self._fill_sign_menu(self.sign_menu))
+        self.act_sign.setMenu(self.sign_menu)
 
     def _build_toolbar(self) -> None:
         tb = QToolBar("Herramientas", self)
@@ -218,6 +259,11 @@ class MainWindow(QMainWindow):
         tb.addSeparator()
         for a in self.tools.values():
             tb.addAction(a)
+        tb.addAction(self.act_sign)
+        button = tb.widgetForAction(self.act_sign)
+        if isinstance(button, QToolButton):
+            button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+            button.setStyleSheet("QToolButton::menu-indicator { image: none; width: 0; }")
         tb.addSeparator()
         tb.addActions([self.act_rot_left, self.act_rot_right, self.act_delete_pages])
         spacer = QWidget(tb)
@@ -252,6 +298,9 @@ class MainWindow(QMainWindow):
         m.addActions([self.act_rot_left, self.act_rot_right])
         m.addSeparator()
         m.addAction(self.act_delete_pages)
+        m = mb.addMenu("&Firma")
+        m.aboutToShow.connect(lambda: self._fill_sign_menu(m, full=True))
+        self._fill_sign_menu(m, full=True)  # macOS necesita un menú no vacío
 
     def _build_statusbar(self) -> None:
         self.page_label = QLabel("", self)
@@ -274,11 +323,14 @@ class MainWindow(QMainWindow):
             self._error("No se pudo abrir el archivo", str(err))
             return False
         self._finish_editing(commit=False)
-        if self.doc is not None:
-            self.doc.close()
+        # El anterior se cierra al final: hasta que la vista y las miniaturas
+        # tengan el nuevo, aún pueden consultarlo (p. ej. al vaciar el historial).
+        old = self.doc
         self.doc = doc
         self.editing = TextEditing(doc)
         self._overwrite_ok = False
+        self._signed = is_signed(doc.raw)
+        self._signed_edit_ok = False
         self.history.clear()
         self._settings.setValue("paths/last_dir", str(Path(path).parent))
         # Primero se muestra la vista del documento: si sigue oculta tras la
@@ -286,10 +338,29 @@ class MainWindow(QMainWindow):
         self.stack.setCurrentIndex(1)
         self.view.set_document(doc)
         self.thumbs.set_document(doc)
+        if old is not None:
+            old.close()
         # Cuando el diseño ya ha dado su tamaño real a la vista, se reajusta.
         QTimer.singleShot(0, self.view.refit)
         self._update_state()
+        if self._signed:
+            QTimer.singleShot(0, self._announce_signatures)
         return True
+
+    def _announce_signatures(self) -> None:
+        if self.doc is None or self.doc.path is None:
+            return
+        try:
+            statuses = signature_status(self.doc.path.read_bytes())
+        except OSError:
+            return
+        if not statuses:
+            return
+        names = ", ".join(dict.fromkeys(s.signer for s in statuses))
+        ok = all(s.intact for s in statuses)
+        msg = f"Firmado digitalmente por {names}"
+        msg += " · sin modificar desde la firma" if ok else " · ¡ATENCIÓN: modificado después de firmar!"
+        self.show_status(msg, 10000)
 
     # ---------------------------------------------------------------- guardar
     def save(self) -> bool:
@@ -298,6 +369,11 @@ class MainWindow(QMainWindow):
         self._finish_editing(commit=True)
         if self.doc.path is None:
             return self.save_as()
+        if self.history.is_clean:
+            # Reescribir sin cambios no aporta nada (y en un PDF firmado
+            # invalidaría las firmas).
+            self.statusBar().showMessage("No hay cambios que guardar", 3000)
+            return True
         if not self._overwrite_ok:
             box = QMessageBox(self)
             box.setIcon(QMessageBox.Icon.Question)
@@ -339,6 +415,15 @@ class MainWindow(QMainWindow):
 
     def _do_save(self, path: Path | None) -> bool:
         assert self.doc is not None
+        if path is not None and self._signed and self.history.is_clean and self.doc.path is not None:
+            # Copia exacta: guardar de nuevo invalidaría las firmas.
+            try:
+                if path.resolve() != self.doc.path.resolve():
+                    shutil.copyfile(self.doc.path, path)
+            except OSError as err:
+                self._error("No se pudo guardar", f"No se pudo escribir «{path.name}»: {err.strerror}")
+                return False
+            return self.open_path(path)
         try:
             if path is None:
                 self.doc.save()
@@ -383,6 +468,14 @@ class MainWindow(QMainWindow):
             tool, mode = self.edit_tool, "edit"
         elif action is self.tools["add_text"]:
             tool, mode = self.add_tool, "add"
+        elif action is self.act_sign:
+            tool = self.sign_tool
+        if action is not self.tools["image"]:
+            self._placing_signature = False
+        if tool in (self.image_tool, self.edit_tool, self.add_tool) and not self.ensure_editable():
+            self.image_tool.preset = None
+            self.tools["select"].setChecked(True)
+            tool, mode = self.select_tool, ""
         self.view.set_tool(tool)
         self.format_bar.setVisible(bool(mode))
         if mode:
@@ -398,7 +491,30 @@ class MainWindow(QMainWindow):
                     tool.cancel()
 
     # API para las herramientas (TextToolHost)
+    def ensure_editable(self) -> bool:
+        """En un PDF firmado, avisa (una vez) de que modificarlo invalida las firmas."""
+        if not self._signed or self._signed_edit_ok:
+            return True
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setWindowTitle("Documento firmado")
+        box.setText("Este documento está firmado digitalmente.")
+        box.setInformativeText(
+            "Si lo modificas, las firmas dejarán de ser válidas: se verá que el "
+            "documento se ha alterado después de firmar.\n\n"
+            "Para añadir tu firma no hace falta modificarlo: usa Firma → Firmar con certificado."
+        )
+        edit = box.addButton("Modificar igualmente", QMessageBox.ButtonRole.DestructiveRole)
+        box.addButton(QMessageBox.StandardButton.Cancel)
+        box.exec()
+        if box.clickedButton() is edit:
+            self._signed_edit_ok = True
+            return True
+        return False
+
     def run_command(self, cmd: SnapshotCommand[TextOutcome]) -> TextOutcome | None:
+        if not self.ensure_editable():
+            return None
         try:
             self.history.push(cmd)
         except XpdfError as err:
@@ -414,6 +530,8 @@ class MainWindow(QMainWindow):
         return cmd.result
 
     def run_doc_command(self, cmd: SnapshotCommand[Any], error_title: str) -> bool:
+        if not self.ensure_editable():
+            return False
         try:
             self.history.push(cmd)
         except XpdfError as err:
@@ -459,6 +577,10 @@ class MainWindow(QMainWindow):
         # o estructura): la vista decide si basta re-renderizar o hay que rehacerla.
         self.select_tool.reset()
         self.image_tool.reset()
+        if self._placing_signature:
+            # Firma dibujada ya colocada: se vuelve a «Seleccionar».
+            self._placing_signature = False
+            QTimer.singleShot(0, self.tools["select"].trigger)
         if self.doc is not None:
             self.view.sync()
             self.thumbs.refresh()
@@ -473,6 +595,8 @@ class MainWindow(QMainWindow):
 
     def _run_page_command(self, cmd: SnapshotCommand[object]) -> bool:
         self._finish_editing(commit=True)
+        if not self.ensure_editable():
+            return False
         try:
             self.history.push(cmd)
         except XpdfError as err:
@@ -518,6 +642,139 @@ class MainWindow(QMainWindow):
             if moved:
                 self.view.scroll_to_page(moved[0])
 
+    # ----------------------------------------------------------------- firmas
+    def _fill_sign_menu(self, menu: QMenu, full: bool = False) -> None:
+        menu.clear()
+        has_doc = self.doc is not None
+        menu.addSection("Firmar con certificado digital")
+        for c in self.signatures.certificates:
+            a = menu.addAction(cert_text(c))
+            a.setEnabled(has_doc)
+            a.triggered.connect(lambda _=False, cid=c.id: self.start_certificate_sign(cid))
+        if not self.signatures.certificates:
+            a = menu.addAction("Añadir certificado…")
+            a.triggered.connect(self._add_certificate)
+        menu.addSection("Añadir firma dibujada")
+        for d in self.signatures.drawn:
+            a = menu.addAction(d.label)
+            a.setEnabled(has_doc)
+            a.triggered.connect(lambda _=False, did=d.id: self.insert_drawn(did))
+        if not self.signatures.drawn:
+            a = menu.addAction("Dibujar firma…")
+            a.triggered.connect(self._draw_signature)
+        menu.addSeparator()
+        if full:
+            a = menu.addAction("Firmas del documento…")
+            a.setEnabled(has_doc)
+            a.triggered.connect(self.show_document_signatures)
+        menu.addAction("Gestionar firmas…").triggered.connect(self.manage_signatures)
+        if full:
+            menu.addAction("Cómo firmar documentos").triggered.connect(lambda: show_help(self))
+
+    def manage_signatures(self) -> None:
+        SignaturesDialog(self.signatures, self).exec()
+
+    def _add_certificate(self) -> None:
+        dlg = SignaturesDialog(self.signatures, self)
+        entry = dlg.add_certificate()
+        if entry is not None and self.doc is not None:
+            self.start_certificate_sign(entry.id)
+
+    def _draw_signature(self) -> None:
+        dlg = SignaturesDialog(self.signatures, self)
+        sig = dlg.draw_signature()
+        if sig is not None and self.doc is not None:
+            self.insert_drawn(sig.id)
+
+    def start_certificate_sign(self, cert_id: str) -> None:
+        if self.doc is None:
+            return
+        self._finish_editing(commit=True)
+        self._sign_cert_id = cert_id
+        self.act_sign.trigger()  # herramienta «Firmar»: dibujar el recuadro
+
+    def insert_drawn(self, sig_id: str) -> None:
+        sig = next((d for d in self.signatures.drawn if d.id == sig_id), None)
+        if sig is None or self.doc is None:
+            return
+        path = self.signatures.drawn_path(sig)
+        if not path.is_file():
+            self._error("Firma dibujada", f"No se encuentra la imagen de «{sig.label}». Vuelve a crearla en Gestionar firmas.")
+            return
+        self.image_tool.preset = path
+        self.tools["image"].trigger()
+        if self.image_tool.preset is not None:  # no se canceló el aviso de documento firmado
+            self._placing_signature = True
+            self.show_status("Haz clic donde quieras poner la firma · luego ajústala y pulsa Intro", 0)
+
+    def sign_area(self, page: int, rect: tuple[float, float, float, float]) -> None:
+        """El usuario ha dibujado el recuadro: pedir datos, destino y firmar."""
+        if self.doc is None:
+            return
+        QTimer.singleShot(0, self.tools["select"].trigger)  # al terminar, «Seleccionar»
+        if not self.signatures.certificates:
+            self._add_certificate()
+            return
+        dlg = SignDialog(self.signatures, self._sign_cert_id, self)
+        if dlg.exec() != SignDialog.DialogCode.Accepted:
+            return
+        entry, password = dlg.entry(), dlg.password.text()
+        src = self.doc.path
+        suggested = (
+            str(src.with_name(src.stem + " (firmado).pdf")) if src else str(Path.home() / "documento (firmado).pdf")
+        )
+        out, _ = QFileDialog.getSaveFileName(self, "Guardar documento firmado", suggested, PDF_FILTER)
+        if not out:
+            return
+        if not out.lower().endswith(".pdf"):
+            out += ".pdf"
+        # Sin cambios se firma el archivo tal cual (las firmas previas siguen
+        # siendo válidas); con cambios, el documento como está en pantalla.
+        try:
+            if src is not None and self.history.is_clean:
+                data = src.read_bytes()
+            else:
+                data = self.doc.to_bytes()
+        except OSError as err:
+            self._error("No se pudo firmar", f"No se pudo leer «{src.name if src else ''}»: {err.strerror}")
+            return
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            signer = sign_pdf(
+                data, page, rect, Path(entry.path), password, Path(out),
+                signature_image=dlg.rubric_path(),
+                reason=dlg.reason.text().strip() or None,
+                location=dlg.location.text().strip() or None,
+            )
+        except SignatureError as err:
+            QApplication.restoreOverrideCursor()
+            self._error("No se pudo firmar", str(err))
+            return
+        except Exception:
+            QApplication.restoreOverrideCursor()
+            log.exception("Error firmando")
+            self._error("No se pudo firmar", "Ha ocurrido un error inesperado. El documento no se ha firmado.")
+            return
+        QApplication.restoreOverrideCursor()
+        log.info("Firmado %s por %s", out, signer)
+        # Se abre la copia firmada (los cambios pendientes ya van dentro).
+        self.history.mark_clean()
+        if self.open_path(out):
+            self.show_status(f"Documento firmado por {signer} · guardado como «{Path(out).name}»", 10000)
+
+    def show_document_signatures(self) -> None:
+        if self.doc is None:
+            return
+        if self.doc.path is None or not self._signed:
+            show_signature_status(self, [], False)
+            return
+        try:
+            statuses = signature_status(self.doc.path.read_bytes())
+        except OSError as err:
+            self._error("Firmas del documento", f"No se pudo leer el archivo: {err.strerror}")
+            return
+        show_signature_status(self, statuses, not self.history.is_clean)
+
     def optimize(self) -> None:
         if self.doc is None:
             return
@@ -531,7 +788,7 @@ class MainWindow(QMainWindow):
         for a in (
             self.act_save, self.act_save_as, self.act_optimize, self.act_zoom_in,
             self.act_zoom_out, self.act_fit, self.act_actual,
-            self.tools["edit_text"], self.tools["add_text"], self.tools["image"],
+            self.tools["edit_text"], self.tools["add_text"], self.tools["image"], self.act_sign,
             self.act_rot_left, self.act_rot_right, self.act_delete_pages,
         ):
             a.setEnabled(has_doc)

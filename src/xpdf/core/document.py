@@ -172,6 +172,10 @@ class Document:
         self._path = target
         log.info("Guardado %s", target)
 
+    def to_bytes(self) -> bytes:
+        """El documento tal como se guardaría (compactado), sin escribir a disco."""
+        return bytes(self._doc.tobytes(**SAVE_OPTIONS))
+
     # ------------------------------------------------------------ instantáneas
     @property
     def version(self) -> int:

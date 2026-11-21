@@ -9,6 +9,7 @@ dependencies = [
     "PySide6>=6.7",
     "PyMuPDF>=1.24",
     "certifi>=2026.10.23",
+    "pyhanko>=0.38.2",
 ]
 
 [project.scripts]

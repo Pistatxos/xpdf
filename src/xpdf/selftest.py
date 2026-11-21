@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import tempfile
 import traceback
+from collections.abc import Callable
 from pathlib import Path
 
 
@@ -59,9 +60,43 @@ def run(report: Path) -> int:
             check("editar texto", "Texto editado: ñandú y €." in text)
             check("añadir texto", "Añadido" in text)
             check("renderizar", doc.render_page(0, 1.0).width > 0)
+            _check_signing(Path(tmp), out, check)
     except Exception:
         ok = False
         lines.append("FALLO excepción:\n" + traceback.format_exc())
     lines.append("RESULTADO: " + ("OK" if ok else "FALLO"))
     report.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return 0 if ok else 1
+
+
+def _check_signing(tmp: Path, pdf: Path, check: Callable[[str, bool, str], None]) -> None:
+    """Firma con un certificado de prueba generado al vuelo (comprueba pyHanko)."""
+    import datetime as dt
+
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.hazmat.primitives.serialization import pkcs12
+    from cryptography.x509.oid import NameOID
+
+    from xpdf.core.signatures import sign_pdf, signature_status
+    from xpdf.ui.signatures_ui import help_text
+
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "PRUEBA XPDF")])
+    now = dt.datetime.now(dt.timezone.utc)
+    cert = (
+        x509.CertificateBuilder().subject_name(name).issuer_name(name).public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - dt.timedelta(days=1)).not_valid_after(now + dt.timedelta(days=30))
+        .sign(key, hashes.SHA256())
+    )
+    p12 = tmp / "prueba.p12"
+    p12.write_bytes(pkcs12.serialize_key_and_certificates(
+        b"prueba", key, cert, None, serialization.BestAvailableEncryption(b"clave")
+    ))
+    signed = tmp / "firmado.pdf"
+    sign_pdf(pdf.read_bytes(), 0, (72, 600, 300, 680), p12, "clave", signed)
+    st = signature_status(signed.read_bytes())
+    check("firmar con certificado", len(st) == 1 and st[0].intact, str(st))
+    check("ayuda de firmas", "Cómo firmar" in help_text(), "")

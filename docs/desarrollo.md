@@ -26,6 +26,7 @@ src/xpdf/
 │   ├── images.py    añadir, mover, reemplazar y borrar imágenes
 │   ├── contentstream.py  localiza el dibujo exacto de cada imagen
 │   ├── optimize.py  «Reducir tamaño…»
+│   ├── signatures.py  firmas: certificados (pyHanko) y rúbricas
 │   └── editing.py   fachada para la interfaz
 ├── ui/              PySide6 — nunca llama a PyMuPDF directamente
 └── updater.py       actualizaciones desde GitHub Releases
@@ -78,6 +79,7 @@ tipografía Inter Black (en `tools/fonts/`, solo para generarlo).
 - xpdf: [AGPL-3.0-or-later](../LICENSE).
 - [PyMuPDF](https://pymupdf.readthedocs.io) (AGPL) y
   [PySide6](https://doc.qt.io/qtforpython-6/) (LGPL).
+- Firma digital PAdES con [pyHanko](https://github.com/MatthiasValvekens/pyHanko) (MIT).
 - Fuentes de respaldo [Liberation](https://github.com/liberationfonts/liberation-fonts)
   (SIL OFL 1.1), incluidas en `assets/fonts/`.
 - Iconos [Lucide](https://lucide.dev) (ISC), en `assets/icons/`.

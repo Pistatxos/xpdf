@@ -8,7 +8,7 @@ import traceback
 from pathlib import Path
 from types import TracebackType
 
-from PySide6.QtCore import QEvent, QSize
+from PySide6.QtCore import QEvent, QLibraryInfo, QSize, QTranslator
 from PySide6.QtGui import QFileOpenEvent, QIcon
 from PySide6.QtWidgets import QApplication, QMessageBox
 
@@ -69,6 +69,13 @@ def main() -> int:
     app.setApplicationName("xpdf")
     app.setOrganizationName("xpdf")
     app.setApplicationVersion(__version__)
+    # La interfaz está en español: también los botones estándar de Qt
+    # («Cancelar», «Cerrar», «Sí»...), sea cual sea el idioma del sistema.
+    qt_es = QTranslator(app)
+    if qt_es.load("qtbase_es", QLibraryInfo.path(QLibraryInfo.LibraryPath.TranslationsPath)):
+        app.installTranslator(qt_es)
+    else:
+        log.warning("No se encontró la traducción de Qt al español")
     # «xpdf» en grande y medio; solo la «x» en tamaños mínimos (barra de título).
     app_icon = QIcon(str(assets_dir() / "icons" / "app.png"))
     app_icon.addFile(str(assets_dir() / "icons" / "app-medium.png"), QSize(64, 64))

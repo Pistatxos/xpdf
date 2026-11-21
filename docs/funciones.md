@@ -47,6 +47,20 @@ cursiva. Los tiradores fijan un ancho a partir del cual el texto pasa de línea.
 - Las fotos muy grandes se reducen a lo necesario para su tamaño en la página
   (300 ppp), para que el PDF no engorde.
 
+## Firmar
+
+- **Con certificado digital** (`.pfx` o `.p12`): botón **Firmar** → elige el
+  certificado → dibuja el recuadro → contraseña. Se guarda una copia
+  «(firmado)»; el original no se toca. Puedes añadir tu rúbrica al sello.
+- **Firma dibujada:** dibújala o importa una foto en *Firma → Gestionar firmas*
+  y colócala como una imagen.
+- Varios certificados y rúbricas por ordenador; la contraseña se pide siempre
+  y nunca se guarda.
+- Los PDF ya firmados se pueden volver a firmar sin invalidar las firmas
+  anteriores. Modificarlos sí las invalida: xpdf avisa antes.
+
+Paso a paso: [docs/firma.md](firma.md).
+
 ## Páginas
 
 - Selecciona una o varias miniaturas (`Ctrl/⌘` o `Mayús` + clic).

@@ -22,6 +22,7 @@ Gratuito, de código abierto y sin nube: tus PDFs no salen de tu ordenador.
 - **Añadir texto** en cualquier punto.
 - **Imágenes:** añadir, mover, cambiar de tamaño, reemplazar y borrar.
 - **Páginas:** reordenar arrastrando, girar y borrar.
+- **Firmar** con tu certificado digital (`.pfx`/`.p12`) o con tu firma dibujada: [cómo firmar](docs/firma.md).
 - **Guardar** sin engordar el archivo, y **reducir tamaño** de una copia.
 - **Deshacer** todo, incluso después de guardar.
 
@@ -51,11 +52,10 @@ arrancar te avisa si hay una versión nueva.
 ## Más información
 
 - [Funciones y atajos](docs/funciones.md)
+- [Cómo firmar documentos](docs/firma.md) (también en la app: *Ayuda*)
 - [Windows: avisos de seguridad y bloqueos](docs/windows.md)
 - [Limitaciones conocidas y privacidad](docs/limitaciones.md)
 - [Desarrollo, compilar y publicar versiones](docs/desarrollo.md)
-
-**Próximamente:** firma (manuscrita y con certificado digital).
 
 ## Licencia
 
