@@ -23,6 +23,7 @@ from pathlib import Path
 
 import pymupdf
 
+from xpdf import __version__
 from xpdf.core.errors import XpdfError
 from xpdf.paths import user_data_dir
 
@@ -361,34 +362,30 @@ def sign_pdf(
     box_w_int = round(box[2]) - round(box[0])
     tmp_dir = Path(tempfile.mkdtemp(prefix="xpdf-firma-"))
     stamp_text = "Firmado digitalmente por\n%(signer)s\nFecha: %(ts)s"
-    if signature_image is not None:
-        style = TextStampStyle(
-            stamp_text=stamp_text,
-            text_box_style=text_style,
-            border_width=0,
-            background=ImportedPdfPage(str(_image_as_pdf(signature_image, tmp_dir))),
-            background_opacity=1.0,
-            # rúbrica en la mitad izquierda, texto en la derecha
-            background_layout=SimpleBoxLayoutRule(
-                x_align=AxisAlignment.ALIGN_MID, y_align=AxisAlignment.ALIGN_MID,
-                margins=Margins(left=4, right=box_w_int - split + 2, top=4, bottom=4),
-            ),
-            inner_content_layout=SimpleBoxLayoutRule(
-                x_align=AxisAlignment.ALIGN_MIN, y_align=AxisAlignment.ALIGN_MID,
-                margins=Margins(left=split + 4, right=4, top=4, bottom=4),
-            ),
-            timestamp_format="%d/%m/%Y %H:%M:%S %Z",
+    box_h_int = round(box[3]) - round(box[1])
+    background = _stamp_background(box_w_int, box_h_int, signature_image, split, tmp_dir)
+    if with_image:  # rúbrica a la izquierda, texto a la derecha
+        text_layout = SimpleBoxLayoutRule(
+            x_align=AxisAlignment.ALIGN_MIN, y_align=AxisAlignment.ALIGN_MID,
+            margins=Margins(left=split + 4, right=4, top=4, bottom=4),
         )
     else:
-        style = TextStampStyle(
-            stamp_text=stamp_text,
-            text_box_style=text_style,
-            border_width=1,
-            inner_content_layout=SimpleBoxLayoutRule(
-                x_align=AxisAlignment.ALIGN_MID, y_align=AxisAlignment.ALIGN_MID, margins=Margins.uniform(6)
-            ),
-            timestamp_format="%d/%m/%Y %H:%M:%S %Z",
+        text_layout = SimpleBoxLayoutRule(
+            x_align=AxisAlignment.ALIGN_MID, y_align=AxisAlignment.ALIGN_MID, margins=Margins.uniform(6)
         )
+    style = TextStampStyle(
+        stamp_text=stamp_text,
+        text_box_style=text_style,
+        border_width=0,
+        # Fondo del tamaño exacto del recuadro: logo difuminado (+ rúbrica).
+        background=ImportedPdfPage(str(background)),
+        background_opacity=1.0,
+        background_layout=SimpleBoxLayoutRule(
+            x_align=AxisAlignment.ALIGN_MID, y_align=AxisAlignment.ALIGN_MID, margins=Margins.uniform(0)
+        ),
+        inner_content_layout=text_layout,
+        timestamp_format="%d/%m/%Y %H:%M:%S %Z",
+    )
     meta = signers.PdfSignatureMetadata(
         field_name=field_name,
         md_algorithm="sha256",
@@ -407,6 +404,12 @@ def sign_pdf(
         ),
     )
     out = io.BytesIO()
+    # «Producer» del PDF: pyHanko añade su nombre al del programa original; que
+    # diga que lo firmó xpdf (con pyHanko, que es quien hace la firma).
+    from pyhanko.pdf_utils.metadata import model as meta_model
+
+    vendor = meta_model.VENDOR
+    meta_model.VENDOR = f"xpdf {__version__} (pyHanko)"
     try:
         writer = IncrementalPdfFileWriter(io.BytesIO(data), strict=False)
         pdf_signer.sign_pdf(writer, output=out)
@@ -416,23 +419,42 @@ def sign_pdf(
         log.exception("Error firmando")
         raise SignatureError("No se pudo firmar el documento.") from exc
     finally:
+        meta_model.VENDOR = vendor
         shutil.rmtree(tmp_dir, ignore_errors=True)
     _write_atomic(out_path, out.getvalue())
     return subject
 
 
-def _image_as_pdf(image: Path, folder: Path) -> Path:
-    """La rúbrica como página PDF de su mismo tamaño (fondo del sello de firma).
+#: Opacidad del logo de fondo del sello (como el de Acrobat: se intuye, no molesta).
+LOGO_OPACITY = 0.13
+LOGO_ORANGE = (0.97, 0.45, 0.09)
+LOGO_BLUE = (0.24, 0.39, 0.89)
 
-    Así pyHanko no necesita Pillow para incluir la imagen.
+
+def _draw_logo(page: pymupdf.Page, w: float, h: float) -> None:
+    """Marca «xpdf» difuminada en el centro (vectorial: nítida a cualquier zoom)."""
+    unit = pymupdf.get_text_length("xpdf", "hebo", 1)
+    fs = min(h * 0.85, w * 0.75 / unit)
+    x = (w - unit * fs) / 2
+    y = h / 2 + fs * 0.28  # línea base: centra la altura de la «x» y la «d»
+    page.insert_text((x, y), "x", fontname="hebo", fontsize=fs, color=LOGO_ORANGE, fill_opacity=LOGO_OPACITY)
+    x += pymupdf.get_text_length("x", "hebo", fs)
+    page.insert_text((x, y), "pdf", fontname="hebo", fontsize=fs, color=LOGO_BLUE, fill_opacity=LOGO_OPACITY)
+
+
+def _stamp_background(w: int, h: int, rubric: Path | None, split: int, folder: Path) -> Path:
+    """Fondo del sello como PDF de w×h puntos: logo de xpdf difuminado en el
+    centro y, si hay, la rúbrica en la parte izquierda.
+
+    Se compone con PyMuPDF para que pyHanko no necesite Pillow.
     """
-    pix = pymupdf.Pixmap(str(image))
-    w, h = pix.width * 72 / 150, pix.height * 72 / 150  # a 150 ppp
     doc = pymupdf.open()
     page = doc.new_page(width=w, height=h)
-    page.insert_image(page.rect, filename=str(image))
-    out = folder / "rubrica.pdf"
-    doc.save(out)
+    _draw_logo(page, w, h)
+    if rubric is not None:
+        page.insert_image(pymupdf.Rect(4, 4, split - 2, h - 4), filename=str(rubric), keep_proportion=True)
+    out = folder / "fondo.pdf"
+    doc.save(out, deflate=True)
     doc.close()
     return out
 
