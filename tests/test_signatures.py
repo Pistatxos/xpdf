@@ -168,3 +168,26 @@ def test_sign_edited_document(certs: tuple[Path, Path], tmp_path: Path) -> None:
     st = signatures.signature_status(out.read_bytes())
     assert [s.intact for s in st] == [True]
     assert "Editado" in pymupdf.open(out)[0].get_text()
+
+
+def test_signing_keeps_document_info(certs: tuple[Path, Path], tmp_path: Path) -> None:
+    """Como Acrobat: firmar no cambia autor, creador ni programa del documento."""
+    d = pymupdf.open()
+    d.new_page().insert_text((72, 100), "Hola")
+    info = {"author": "Microsoft Word", "creator": "Microsoft Word", "producer": "Microsoft Word"}
+    d.set_metadata(info)
+    out = tmp_path / "firmado.pdf"
+    sign_pdf(bytes(d.tobytes()), 0, (72, 600, 300, 680), certs[0], "secreto", out)
+    meta = pymupdf.open(out).metadata
+    assert {k: meta[k] for k in info} == info
+    assert [s.intact for s in signature_status(out.read_bytes())] == [True]
+
+
+def test_long_signer_name_fits(tmp_path: Path) -> None:
+    p12 = make_p12(tmp_path / "fnmt.p12", "GARCIA LOPEZ MARIA DEL CARMEN - 12345678Z", "x")
+    d = pymupdf.open()
+    d.new_page()
+    out = tmp_path / "f.pdf"
+    sign_pdf(bytes(d.tobytes()), 0, (72, 600, 300, 670), p12, "x", out)
+    words = pymupdf.open(out)[0].get_text("words", clip=pymupdf.Rect(60, 590, 320, 680))
+    assert any(w[4] == "12345678Z" for w in words)  # el nombre completo, dentro del sello

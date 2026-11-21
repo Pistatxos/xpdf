@@ -20,12 +20,15 @@ import tempfile
 import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pymupdf
 
-from xpdf import __version__
 from xpdf.core.errors import XpdfError
 from xpdf.paths import user_data_dir
+
+if TYPE_CHECKING:  # pyHanko se importa al firmar: arrancar la app no lo carga
+    from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
 
 log = logging.getLogger(__name__)
 
@@ -330,7 +333,6 @@ def sign_pdf(
     """
     from pyhanko.pdf_utils.font.basic import SimpleFontEngineFactory
     from pyhanko.pdf_utils.content import ImportedPdfPage
-    from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
     from pyhanko.pdf_utils.layout import AxisAlignment, Margins, SimpleBoxLayoutRule
     from pyhanko.pdf_utils.text import TextBoxStyle
     from pyhanko.sign import fields, signers
@@ -348,36 +350,42 @@ def sign_pdf(
         doc.close()
 
     box_w, box_h = abs(box[2] - box[0]), abs(box[3] - box[1])
-    with_image = signature_image is not None
-    split = int(box_w * 0.42)  # con rúbrica: rúbrica a la izquierda, texto a la derecha
-    text_w = (box_w - split if with_image else box_w) - 16
+    # Como Acrobat: a la izquierda el nombre en grande (o la rúbrica) y a la
+    # derecha «Firmado digitalmente por…» con la fecha.
+    split = int(box_w * 0.45)
+    text_w = box_w - split - 12
     # Letra lo más grande posible (hasta 14 pt) con la que quepan las 3 líneas.
     # (pyHanko solo admite enteros en tamaños y márgenes)
-    lines = ("Firmado digitalmente por", subject, "Fecha: 00/00/0000 00:00:00 CET")
-    widest = max(pymupdf.get_text_length(t, "helv", 1) for t in lines)
-    font_size = int(max(5, min(14, (box_h - 10) / 3.6, text_w / widest)))
+    # Un nombre largo (p. ej. «APELLIDOS NOMBRE - DNI» de la FNMT) se parte en
+    # varias líneas si así la letra queda más grande.
+    best: tuple[float, list[str]] = (0.0, [subject])
+    words = subject.split()
+    for n in range(1, min(3, len(words)) + 1):
+        name_lines = _balanced(words, n)
+        lines = ["Firmado digitalmente por", *name_lines, "Fecha: 00/00/0000 00:00:00 CET"]
+        widest = max(pymupdf.get_text_length(t, "helv", 1) for t in lines)
+        fs = min(14.0, (box_h - 10) / (1.2 * len(lines)), text_w / widest)
+        if fs > best[0] + 0.5:
+            best = (fs, name_lines)
+    font_size = int(max(5, best[0]))
+    signer_text = "\n".join(best[1]).replace("%", "%%")
     # Helvetica: fuente estándar de todo lector PDF (cubre acentos y ñ) y no
     # requiere incrustar nada ni dependencias extra de pyHanko.
     text_style = TextBoxStyle(font=SimpleFontEngineFactory("Helvetica", 0.5), font_size=font_size)
     box_w_int = round(box[2]) - round(box[0])
     tmp_dir = Path(tempfile.mkdtemp(prefix="xpdf-firma-"))
-    stamp_text = "Firmado digitalmente por\n%(signer)s\nFecha: %(ts)s"
+    stamp_text = "Firmado digitalmente por\n" + signer_text + "\nFecha: %(ts)s"
     box_h_int = round(box[3]) - round(box[1])
-    background = _stamp_background(box_w_int, box_h_int, signature_image, split, tmp_dir)
-    if with_image:  # rúbrica a la izquierda, texto a la derecha
-        text_layout = SimpleBoxLayoutRule(
-            x_align=AxisAlignment.ALIGN_MIN, y_align=AxisAlignment.ALIGN_MID,
-            margins=Margins(left=split + 4, right=4, top=4, bottom=4),
-        )
-    else:
-        text_layout = SimpleBoxLayoutRule(
-            x_align=AxisAlignment.ALIGN_MID, y_align=AxisAlignment.ALIGN_MID, margins=Margins.uniform(6)
-        )
+    background = _stamp_background(box_w_int, box_h_int, subject, signature_image, split, tmp_dir)
+    text_layout = SimpleBoxLayoutRule(
+        x_align=AxisAlignment.ALIGN_MIN, y_align=AxisAlignment.ALIGN_MID,
+        margins=Margins(left=split + 6, right=4, top=4, bottom=4),
+    )
     style = TextStampStyle(
         stamp_text=stamp_text,
         text_box_style=text_style,
         border_width=0,
-        # Fondo del tamaño exacto del recuadro: logo difuminado (+ rúbrica).
+        # Fondo del tamaño exacto del recuadro: logo difuminado + nombre o rúbrica.
         background=ImportedPdfPage(str(background)),
         background_opacity=1.0,
         background_layout=SimpleBoxLayoutRule(
@@ -404,14 +412,8 @@ def sign_pdf(
         ),
     )
     out = io.BytesIO()
-    # «Producer» del PDF: pyHanko añade su nombre al del programa original; que
-    # diga que lo firmó xpdf (con pyHanko, que es quien hace la firma).
-    from pyhanko.pdf_utils.metadata import model as meta_model
-
-    vendor = meta_model.VENDOR
-    meta_model.VENDOR = f"xpdf {__version__} (pyHanko)"
     try:
-        writer = IncrementalPdfFileWriter(io.BytesIO(data), strict=False)
+        writer = _keep_info_writer(data)
         pdf_signer.sign_pdf(writer, output=out)
     except SignatureError:
         raise
@@ -419,7 +421,6 @@ def sign_pdf(
         log.exception("Error firmando")
         raise SignatureError("No se pudo firmar el documento.") from exc
     finally:
-        meta_model.VENDOR = vendor
         shutil.rmtree(tmp_dir, ignore_errors=True)
     _write_atomic(out_path, out.getvalue())
     return subject
@@ -442,21 +443,72 @@ def _draw_logo(page: pymupdf.Page, w: float, h: float) -> None:
     page.insert_text((x, y), "pdf", fontname="hebo", fontsize=fs, color=LOGO_BLUE, fill_opacity=LOGO_OPACITY)
 
 
-def _stamp_background(w: int, h: int, rubric: Path | None, split: int, folder: Path) -> Path:
+def _draw_name(page: pymupdf.Page, name: str, rect: pymupdf.Rect) -> None:
+    """El nombre del firmante lo más grande posible en `rect` (1 a 3 líneas)."""
+    words = name.split()
+    best: tuple[float, list[str]] = (0.0, [name])
+    for n in range(1, min(3, len(words)) + 1):
+        lines = _balanced(words, n)
+        widest = max(pymupdf.get_text_length(t, "helv", 1) for t in lines)
+        fs = min(rect.height / (n * 1.18), rect.width / widest, 28.0)
+        if fs > best[0] + 0.5:  # solo partir si gana tamaño claramente
+            best = (fs, lines)
+    fs, lines = best
+    y = rect.y0 + (rect.height - len(lines) * fs * 1.18) / 2 + fs * 0.93
+    for t in lines:
+        page.insert_text((rect.x0, y), t, fontname="helv", fontsize=fs, color=(0, 0, 0))
+        y += fs * 1.18
+
+
+def _balanced(words: list[str], n: int) -> list[str]:
+    """Reparte las palabras en `n` líneas de longitud parecida."""
+    total = sum(len(w) for w in words) + len(words) - 1
+    target = total / n
+    lines: list[str] = []
+    cur: list[str] = []
+    for i, w in enumerate(words):
+        left_words = len(words) - i
+        left_lines = n - len(lines)
+        if cur and (len(" ".join(cur + [w])) > target * 1.15 or left_words < left_lines) and left_lines > 1:
+            lines.append(" ".join(cur))
+            cur = []
+        cur.append(w)
+    lines.append(" ".join(cur))
+    return lines
+
+
+def _stamp_background(
+    w: int, h: int, subject: str, rubric: Path | None, split: int, folder: Path
+) -> Path:
     """Fondo del sello como PDF de w×h puntos: logo de xpdf difuminado en el
-    centro y, si hay, la rúbrica en la parte izquierda.
+    centro y, a la izquierda, la rúbrica o el nombre del firmante en grande.
 
     Se compone con PyMuPDF para que pyHanko no necesite Pillow.
     """
     doc = pymupdf.open()
     page = doc.new_page(width=w, height=h)
     _draw_logo(page, w, h)
+    left = pymupdf.Rect(4, 4, split - 4, h - 4)
     if rubric is not None:
-        page.insert_image(pymupdf.Rect(4, 4, split - 2, h - 4), filename=str(rubric), keep_proportion=True)
+        page.insert_image(left, filename=str(rubric), keep_proportion=True)
+    else:
+        _draw_name(page, subject, left)
     out = folder / "fondo.pdf"
     doc.save(out, deflate=True)
     doc.close()
     return out
+
+
+def _keep_info_writer(data: bytes) -> IncrementalPdfFileWriter:
+    """Escritor incremental que, como Acrobat, no cambia los datos del documento
+    (autor, creador, programa...): pyHanko añadiría su nombre como «Producer»."""
+    from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
+
+    class KeepInfoWriter(IncrementalPdfFileWriter):
+        def _update_meta(self) -> None:
+            pass
+
+    return KeepInfoWriter(io.BytesIO(data), strict=False)
 
 
 def _write_atomic(target: Path, data: bytes) -> None:
