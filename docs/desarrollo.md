@@ -23,6 +23,8 @@ src/xpdf/
 │   ├── pdffonts.py  escritura con las fuentes originales del PDF
 │   ├── fonts.py     elección de fuentes y comprobación de glifos
 │   ├── pages.py     borrar, girar y reordenar páginas
+│   ├── images.py    añadir, mover, reemplazar y borrar imágenes
+│   ├── contentstream.py  localiza el dibujo exacto de cada imagen
 │   ├── optimize.py  «Reducir tamaño…»
 │   └── editing.py   fachada para la interfaz
 ├── ui/              PySide6 — nunca llama a PyMuPDF directamente

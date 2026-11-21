@@ -8,9 +8,10 @@ un clic a coordenadas de página sin conocer el zoom.
 
 from __future__ import annotations
 
-from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, Signal
+from PySide6.QtCore import QPoint, QPointF, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QColor,
+    QContextMenuEvent,
     QKeyEvent,
     QMouseEvent,
     QNativeGestureEvent,
@@ -90,6 +91,8 @@ class ViewTool:
     def mouse_release(self, page: int | None, pos: QPointF | None, event: QMouseEvent) -> bool:
         return False
     def key_press(self, event: QKeyEvent) -> bool:
+        return False
+    def context_menu(self, page: int, pos: QPointF, global_pos: QPoint) -> bool:
         return False
     def cursor(self) -> Qt.CursorShape:
         return Qt.CursorShape.ArrowCursor
@@ -307,6 +310,20 @@ class PageView(QGraphicsView):
             event.accept()
             return
         super().mouseReleaseEvent(event)
+
+    def contextMenuEvent(self, event: QContextMenuEvent) -> None:
+        hit = self.page_at(self.mapToScene(event.pos()))
+        if self._tool is not None and hit is not None and self._tool.context_menu(hit[0], hit[1], event.globalPos()):
+            event.accept()
+            return
+        super().contextMenuEvent(event)
+
+    def to_viewport(self, page: int, pos: QPointF) -> QPointF:
+        """Punto de la página (puntos PDF) -> píxeles del área visible."""
+        item = self.page_item(page)
+        if item is None:
+            return QPointF()
+        return QPointF(self.mapFromScene(item.mapToScene(pos)))
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
         if self._tool is not None and self._tool.key_press(event):

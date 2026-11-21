@@ -20,6 +20,7 @@ Gratuito, de código abierto y sin nube: tus PDFs no salen de tu ordenador.
 
 - **Editar texto** existente con un clic, con la misma fuente del PDF.
 - **Añadir texto** en cualquier punto.
+- **Imágenes:** añadir, mover, cambiar de tamaño, reemplazar y borrar.
 - **Páginas:** reordenar arrastrando, girar y borrar.
 - **Guardar** sin engordar el archivo, y **reducir tamaño** de una copia.
 - **Deshacer** todo, incluso después de guardar.
@@ -54,7 +55,7 @@ arrancar te avisa si hay una versión nueva.
 - [Limitaciones conocidas y privacidad](docs/limitaciones.md)
 - [Desarrollo, compilar y publicar versiones](docs/desarrollo.md)
 
-**Próximamente:** imágenes (añadir, mover, reemplazar y eliminar).
+**Próximamente:** firma (manuscrita y con certificado digital).
 
 ## Licencia
 

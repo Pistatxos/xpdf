@@ -31,6 +31,19 @@ Elige **Añadir texto** (`T`), haz clic en la página y escribe. En la barra de
 formato eliges tipo de letra (sans, serif, mono), tamaño, color, negrita y
 cursiva. Los tiradores fijan un ancho a partir del cual el texto pasa de línea.
 
+## Imágenes
+
+- **Seleccionar** (`V`): clic en una imagen para seleccionarla.
+  - Arrastra para **moverla**; desde una esquina, **cambia el tamaño**
+    (mantiene la proporción; con `Mayús`, libre).
+  - `Supr` la **borra**; clic derecho → **Reemplazar imagen…** o **Borrar**.
+  - Solo cambia esa imagen: si el mismo logo aparece en otras páginas o
+    posiciones, esas no se tocan. Un fondo sigue quedando detrás del texto.
+- **Añadir imagen** (`I`): clic en la página, elige un PNG o JPG, colócala con
+  el ratón y confirma con `Intro` (o un clic fuera). `Esc` cancela.
+- Las fotos muy grandes se reducen a lo necesario para su tamaño en la página
+  (300 ppp), para que el PDF no engorde.
+
 ## Páginas
 
 - Selecciona una o varias miniaturas (`Ctrl/⌘` o `Mayús` + clic).
@@ -53,7 +66,8 @@ cursiva. Los tiradores fijan un ancho a partir del cual el texto pasa de línea.
 |---|---|
 | Abrir · Guardar · Guardar como | Ctrl/⌘ + O · S · Mayús+S |
 | Deshacer · Rehacer | Ctrl/⌘ + Z · Mayús+Z |
-| Seleccionar · Editar texto · Añadir texto | V · E · T |
+| Seleccionar · Editar texto · Añadir texto · Imagen | V · E · T · I |
+| Borrar imagen seleccionada | Supr |
 | Negrita · Cursiva (editando) | Ctrl/⌘ + B · I |
 | Confirmar · Cancelar edición | Ctrl+Intro (o clic fuera) · Esc |
 | Girar página izquierda · derecha | Ctrl/⌘ + L · R |

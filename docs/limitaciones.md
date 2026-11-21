@@ -8,7 +8,9 @@ xpdf prefiere no dejarte editar algo a estropearlo. Te lo dice al hacer clic en:
 
 - párrafos con **fórmulas matemáticas**;
 - fuentes de **símbolos** (Wingdings…) o fuentes **Type3**;
-- texto **vertical** y la capa invisible de **OCR** de los escaneados.
+- texto **vertical** y la capa invisible de **OCR** de los escaneados;
+- imágenes que forman parte de un **grupo** del PDF (por ejemplo, una página
+  importada dentro de otra).
 
 ## Otras limitaciones
 
@@ -18,6 +20,7 @@ xpdf prefiere no dejarte editar algo a estropearlo. Te lo dice al hacer clic en:
   ruta de composición menos fiel al original.
 - La vista previa mientras escribes usa el motor de texto del sistema: los cortes
   de línea pueden variar algo respecto al resultado final.
+- Al reemplazar una imagen, la nueva queda por encima del resto de elementos.
 - En macOS solo hay versión para Apple Silicon (M1 o posterior).
 
 ## Privacidad

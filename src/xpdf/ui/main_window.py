@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import Any
 
 from PySide6.QtCore import QEvent, QSettings, Qt, QTimer
 from PySide6.QtGui import (
@@ -39,6 +40,7 @@ from xpdf.ui.optimize_dialog import run_optimize_dialog
 from xpdf.ui.page_view import PageView, ViewTool
 from xpdf.ui.text_editor import TextEditorOverlay
 from xpdf.ui.thumbnails import ThumbnailPanel
+from xpdf.ui.tools.image_tools import AddImageTool, ImageSelectTool
 from xpdf.ui.tools.text_tools import AddTextTool, EditTextTool
 from xpdf.ui.update_ui import UpdateController, show_about
 
@@ -89,6 +91,9 @@ class MainWindow(QMainWindow):
         self.format_bar.hide()
         self.edit_tool = EditTextTool(self)
         self.add_tool = AddTextTool(self)
+        self.select_tool = ImageSelectTool(self)
+        self.image_tool = AddImageTool(self)
+        self.view.set_tool(self.select_tool)  # «Seleccionar» es la herramienta inicial
         self.format_bar.newStyleChanged.connect(self.add_tool.restyle)
         self.tool_group.triggered.connect(self._on_tool_changed)
 
@@ -189,8 +194,8 @@ class MainWindow(QMainWindow):
             self.tool_group.addAction(a)
             self.tools[key] = a
         self.tools["select"].setChecked(True)
-        self.tools["image"].setEnabled(False)  # fase 4
-        self.tools["image"].setToolTip("Imagen (próximamente)")
+        self.tools["select"].setToolTip("Seleccionar: mover, redimensionar o borrar imágenes (V)")
+        self.tools["image"].setToolTip("Añadir imagen (I)")
 
     def _build_toolbar(self) -> None:
         tb = QToolBar("Herramientas", self)
@@ -366,7 +371,11 @@ class MainWindow(QMainWindow):
     def _on_tool_changed(self, action: QAction) -> None:
         tool: ViewTool | None = None
         mode = ""
-        if action is self.tools["edit_text"]:
+        if action is self.tools["select"]:
+            tool = self.select_tool
+        elif action is self.tools["image"]:
+            tool = self.image_tool
+        elif action is self.tools["edit_text"]:
             tool, mode = self.edit_tool, "edit"
         elif action is self.tools["add_text"]:
             tool, mode = self.add_tool, "add"
@@ -400,6 +409,18 @@ class MainWindow(QMainWindow):
             return None
         return cmd.result
 
+    def run_doc_command(self, cmd: SnapshotCommand[Any], error_title: str) -> bool:
+        try:
+            self.history.push(cmd)
+        except XpdfError as err:
+            self._error(error_title, str(err))
+            return False
+        except Exception:
+            log.exception("Error en %s", cmd.label)
+            self._error(error_title, "Ha ocurrido un error inesperado; el documento no se ha modificado.")
+            return False
+        return True
+
     def show_status(self, message: str, timeout_ms: int = 4000) -> None:
         if message:
             self.statusBar().showMessage(message, timeout_ms)
@@ -429,6 +450,8 @@ class MainWindow(QMainWindow):
     def _on_history_changed(self) -> None:
         # Cualquier paso del historial puede haber cambiado el documento (texto
         # o estructura): la vista decide si basta re-renderizar o hay que rehacerla.
+        self.select_tool.reset()
+        self.image_tool.reset()
         if self.doc is not None:
             self.view.sync()
             self.thumbs.refresh()
@@ -501,7 +524,7 @@ class MainWindow(QMainWindow):
         for a in (
             self.act_save, self.act_save_as, self.act_optimize, self.act_zoom_in,
             self.act_zoom_out, self.act_fit, self.act_actual,
-            self.tools["edit_text"], self.tools["add_text"],
+            self.tools["edit_text"], self.tools["add_text"], self.tools["image"],
             self.act_rot_left, self.act_rot_right, self.act_delete_pages,
         ):
             a.setEnabled(has_doc)
