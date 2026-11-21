@@ -13,6 +13,7 @@ como en el resto de `core`.
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,7 +21,7 @@ from typing import TYPE_CHECKING, TypeVar
 
 import pymupdf
 
-from xpdf.core.contentstream import ImageDraw, image_draws, replace_span
+from xpdf.core.contentstream import ImageDraw, add_resource, draw_order, first_text, image_draws
 from xpdf.core.document import RenderedPage
 from xpdf.core.errors import XpdfError
 
@@ -51,6 +52,8 @@ class ImageInfo:
     height: int
     #: None si se puede editar; si no, el motivo (para el usuario).
     blocked_reason: str | None
+    #: Opacidad aplicada por xpdf (1 = opaca).
+    opacity: float = 1.0
 
 
 @dataclass(slots=True)
@@ -75,33 +78,65 @@ def _close(a: pymupdf.Matrix, b: pymupdf.Matrix, tol: float = 0.05) -> bool:
 _FLIP = pymupdf.Matrix(1, 0, 0, -1, 0, 1)
 
 
+#: Número a partir del cual se identifican las imágenes que están dentro de grupos.
+_GROUP_BASE = 100_000
+
+
+def _pixel_size(page: pymupdf.Page, draw: ImageDraw, names: dict[str, int]) -> tuple[int, int]:
+    doc = page.parent
+    if draw.name is not None and draw.name in names:
+        xref = names[draw.name]
+        try:
+            return int(doc.xref_get_key(xref, "Width")[1]), int(doc.xref_get_key(xref, "Height")[1])
+        except ValueError:
+            return 0, 0
+    data = (doc.xref_stream(draw.stream_xref) or b"")[draw.start : draw.end]
+    w = re.search(rb"/(?:W|Width)\s+(\d+)", data)
+    h = re.search(rb"/(?:H|Height)\s+(\d+)", data)
+    return (int(w.group(1)) if w else 0, int(h.group(1)) if h else 0)
+
+
 def _placements(page: pymupdf.Page) -> list[_Placement]:
+    """Imágenes de la página.
+
+    Se parte de los dibujos encontrados en el contenido (no de
+    `get_image_info`, que deja de listar las imágenes semitransparentes). Esa
+    función solo se usa para descubrir imágenes dentro de grupos, que se marcan
+    como no editables.
+    """
     to_mupdf = page.transformation_matrix  # P: espacio PDF -> espacio de página sin rotar
     rot = page.rotation_matrix
-    draws = [d for d in image_draws(page) if not d.is_form]
-    used: set[int] = set()
+    doc = page.parent
+    names = {str(img[7]): int(img[0]) for img in page.get_images(full=True)}
     out: list[_Placement] = []
+    for idx, draw in enumerate(d for d in image_draws(page) if not d.is_form):
+        t = _FLIP * draw.ctm * to_mupdf
+        r = pymupdf.Rect(0, 0, 1, 1) * t * rot
+        w = _wrapper(doc.xref_stream(draw.stream_xref) or b"", draw)
+        pw, ph = _pixel_size(page, draw, names)
+        out.append(
+            _Placement(
+                ImageInfo(idx, (r.x0, r.y0, r.x1, r.y1), pw, ph, None, w.alpha if w.alpha is not None else 1.0),
+                t,
+                draw,
+            )
+        )
+    # Imágenes dentro de grupos (Form XObjects): visibles pero no editables.
     for info in page.get_image_info(xrefs=True):
         t = pymupdf.Matrix(info["transform"])
-        match = None
-        for i, d in enumerate(draws):
-            if i not in used and _close(_FLIP * d.ctm * to_mupdf, t):
-                match = i
-                break
-        reason = None
-        if match is None:
-            reason = (
-                "Esta imagen forma parte de un grupo de elementos del PDF y no se puede "
-                "editar por separado."
-            )
-        else:
-            used.add(match)
+        if any(_close(p.transform, t) for p in out):
+            continue
         r = pymupdf.Rect(info["bbox"]) * rot
         out.append(
             _Placement(
-                ImageInfo(int(info["number"]), (r.x0, r.y0, r.x1, r.y1), int(info["width"]), int(info["height"]), reason),
+                ImageInfo(
+                    _GROUP_BASE + int(info["number"]), (r.x0, r.y0, r.x1, r.y1),
+                    int(info["width"]), int(info["height"]),
+                    "Esta imagen forma parte de un grupo de elementos del PDF y no se puede "
+                    "editar por separado.",
+                ),
                 t,
-                draws[match] if match is not None else None,
+                None,
             )
         )
     return out
@@ -137,11 +172,81 @@ def _find(page: pymupdf.Page, number: int) -> _Placement:
 
 
 # ------------------------------------------------------------------ edición
-def delete_image(doc: pymupdf.Document, page_index: int, number: int) -> None:
-    page = doc[page_index]
+# --------------------------------------------------------- el envoltorio
+#: Envoltorio que xpdf pone alrededor de un dibujo de imagen:
+#:     q [/XPAnn gs] [a b c d e f cm] <dibujo> Q
+#: Se reescribe entero en cada cambio, así opacidad y transformaciones no se
+#: acumulan. Un «q … cm /Im Do Q» ajustado que ya traiga el PDF (Word lo hace)
+#: cuenta igual: componer su matriz con la nueva es matemáticamente correcto.
+_NUM = rb"-?(?:\d+\.?\d*|\.\d+)"
+_WRAP_PREFIX = re.compile(
+    rb"(?:^|(?<=[\s\]\)>]))q\s+(?:/(XPA\d{1,3})\s+gs\s+)?(?:((?:" + _NUM + rb"\s+){6})cm\s+)?$"
+)
+
+
+@dataclass(frozen=True, slots=True)
+class _Wrap:
+    start: int  # bytes [start, end) del bloque completo a reescribir
+    end: int
+    core: bytes  # el dibujo en sí («/Im Do» o «BI … EI»)
+    alpha: float | None
+    matrix: pymupdf.Matrix | None  # «cm» del envoltorio, si lo hay
+
+
+def _wrapper(data: bytes, draw: ImageDraw) -> _Wrap:
+    core = data[draw.start : draw.end]
+    window_start = max(0, draw.start - 200)
+    m = _WRAP_PREFIX.search(data[window_start : draw.start])
+    after = data[draw.end : draw.end + 8]
+    closes = re.match(rb"\s*Q", after)
+    if m and closes and (m.group(1) or m.group(2)):
+        alpha = int(m.group(1)[3:]) / 100 if m.group(1) else None
+        matrix = None
+        if m.group(2):
+            matrix = pymupdf.Matrix(*(float(x) for x in m.group(2).split()))
+        return _Wrap(window_start + m.start(), draw.end + closes.end(), core, alpha, matrix)
+    return _Wrap(draw.start, draw.end, core, None, None)
+
+
+def _alpha_name(page: pymupdf.Page, alpha: float) -> bytes:
+    pct = max(5, min(100, round(alpha * 100)))
+    name = f"XPA{pct}"
+    xref = page.parent.get_new_xref()
+    page.parent.update_object(xref, f"<< /Type /ExtGState /ca {pct / 100:.2f} /CA {pct / 100:.2f} >>")
+    if not add_resource(page, "ExtGState", name, f"{xref} 0 R"):
+        raise ImageError("Esta página no admite transparencia (recursos compartidos).")
+    return f"/{name}".encode()
+
+
+def _wrapped(page: pymupdf.Page, core: bytes, alpha: float | None, matrix: pymupdf.Matrix | None) -> bytes:
+    if (alpha is None or alpha >= 0.995) and matrix is None:
+        return core
+    parts = [b"q"]
+    if alpha is not None and alpha < 0.995:
+        parts += [_alpha_name(page, alpha), b"gs"]
+    if matrix is not None:
+        parts += [_fmt(matrix), b"cm"]
+    return b" ".join([*parts, core, b"Q"])
+
+
+def _rewrite(page: pymupdf.Page, draw: ImageDraw, new: bytes, w: _Wrap) -> None:
+    doc = page.parent
+    data = doc.xref_stream(draw.stream_xref) or b""
+    doc.update_stream(draw.stream_xref, data[: w.start] + new + data[w.end :])
+
+
+def _current(page: pymupdf.Page, number: int) -> tuple[_Placement, ImageDraw, _Wrap]:
     p = _find(page, number)
     assert p.draw is not None
-    replace_span(page, p.draw, b"")
+    data = page.parent.xref_stream(p.draw.stream_xref) or b""
+    return p, p.draw, _wrapper(data, p.draw)
+
+
+# ------------------------------------------------------------------ edición
+def delete_image(doc: pymupdf.Document, page_index: int, number: int) -> None:
+    page = doc[page_index]
+    _, draw, w = _current(page, number)
+    _rewrite(page, draw, b"", w)
 
 
 def _fmt(m: pymupdf.Matrix) -> bytes:
@@ -151,8 +256,7 @@ def _fmt(m: pymupdf.Matrix) -> bytes:
 def move_image(doc: pymupdf.Document, page_index: int, number: int, new_bbox: Rect) -> None:
     """Mueve o redimensiona la imagen para que ocupe `new_bbox` (visual)."""
     page = doc[page_index]
-    p = _find(page, number)
-    assert p.draw is not None
+    p, draw, w = _current(page, number)
     unrot = ~page.rotation_matrix
     old = pymupdf.Rect(p.info.bbox) * unrot
     new = pymupdf.Rect(new_bbox) * unrot
@@ -165,9 +269,52 @@ def move_image(doc: pymupdf.Document, page_index: int, number: int, new_bbox: Re
     # actual (C' = M·C), así que M = C·P·A·P⁻¹·C⁻¹, que con C = F·T·P⁻¹ queda
     # M = F·T·A·T⁻¹·F (sin necesidad de conocer C).
     m = _FLIP * p.transform * a * ~p.transform * _FLIP
-    data = doc.xref_stream(p.draw.stream_xref) or b""
-    original = data[p.draw.start : p.draw.end]
-    replace_span(page, p.draw, b"q " + _fmt(m) + b" cm " + original + b" Q")
+    if w.matrix is not None:
+        m = m * w.matrix  # se compone con la matriz que ya tenía el envoltorio
+    _rewrite(page, draw, _wrapped(page, w.core, w.alpha, m), w)
+
+
+def set_opacity(doc: pymupdf.Document, page_index: int, number: int, alpha: float) -> None:
+    """Opacidad de la imagen, de 0,05 a 1 (1 = opaca)."""
+    page = doc[page_index]
+    _, draw, w = _current(page, number)
+    _rewrite(page, draw, _wrapped(page, w.core, max(0.05, min(1.0, alpha)), w.matrix), w)
+
+
+def bring_to_front(doc: pymupdf.Document, page_index: int, number: int) -> None:
+    """Dibuja la imagen la última: queda por encima de todo."""
+    page = doc[page_index]
+    _, draw, w = _current(page, number)
+    block = _wrapped(page, w.core, w.alpha, draw.ctm)  # CTM absoluta: no depende de dónde esté
+    _rewrite(page, draw, b"", w)
+    page.wrap_contents()  # que el contenido previo no deje su estado gráfico
+    xref = doc.get_new_xref()
+    doc.update_object(xref, "<<>>")
+    doc.update_stream(xref, b"\n" + block + b"\n")
+    contents = [*page.get_contents(), xref]
+    doc.xref_set_key(page.xref, "Contents", "[" + " ".join(f"{x} 0 R" for x in contents) + "]")
+
+
+def send_behind_text(doc: pymupdf.Document, page_index: int, number: int) -> bool:
+    """Dibuja la imagen justo antes del primer texto: queda detrás del texto pero
+    delante de fondos y dibujos anteriores. False si ya estaba detrás."""
+    page = doc[page_index]
+    _, draw, w = _current(page, number)
+    pos = first_text(page)
+    if pos is None or draw_order(page, draw) < pos.order:
+        return False
+    # Matriz relativa a la CTM vigente en el punto de inserción.
+    block = _wrapped(page, w.core, w.alpha, draw.ctm * ~pos.ctm) + b"\n"
+    if pos.stream_xref == draw.stream_xref:
+        data = doc.xref_stream(draw.stream_xref) or b""
+        assert pos.offset < w.start  # el texto va antes que la imagen en este flujo
+        new = data[: pos.offset] + block + data[pos.offset : w.start] + data[w.end :]
+        doc.update_stream(draw.stream_xref, new)
+    else:
+        _rewrite(page, draw, b"", w)
+        data = doc.xref_stream(pos.stream_xref) or b""
+        doc.update_stream(pos.stream_xref, data[: pos.offset] + block + data[pos.offset :])
+    return True
 
 
 def _image_bytes(path: Path, target: pymupdf.Rect) -> bytes:
@@ -280,6 +427,18 @@ def replace_command(doc: "Document", page: int, number: int, path: Path) -> "Sna
 
 def add_command(doc: "Document", page: int, bbox: Rect, path: Path) -> "SnapshotCommand[Rect]":
     return _cmd(doc, "añadir imagen", lambda: add_image(doc.raw, page, bbox, path), page)
+
+
+def opacity_command(doc: "Document", page: int, number: int, alpha: float) -> "SnapshotCommand[None]":
+    return _cmd(doc, "opacidad de la imagen", lambda: set_opacity(doc.raw, page, number, alpha), page)
+
+
+def front_command(doc: "Document", page: int, number: int) -> "SnapshotCommand[None]":
+    return _cmd(doc, "traer imagen al frente", lambda: bring_to_front(doc.raw, page, number), page)
+
+
+def behind_text_command(doc: "Document", page: int, number: int) -> "SnapshotCommand[bool]":
+    return _cmd(doc, "enviar imagen detrás del texto", lambda: send_behind_text(doc.raw, page, number), page)
 
 
 def images_on(doc: "Document", page: int) -> list[ImageInfo]:

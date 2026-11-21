@@ -183,3 +183,99 @@ def test_commands_undo_redo(doc: pymupdf.Document, tmp_path: Path) -> None:
     assert any(i.bbox == pytest.approx((10, 10, 170, 90), abs=0.5) for i in images_on(d, 0))
     h.undo()
     assert any(i.bbox == pytest.approx((400, 40, 560, 120), abs=0.5) for i in images_on(d, 0))
+
+
+# ------------------------------------------------ opacidad y orden de capas
+def _logo(doc: pymupdf.Document) -> "object":
+    info = image_at(doc, 0, 480, 80)
+    assert info is not None
+    return info
+
+
+def test_opacity_blends_and_does_not_accumulate(doc: pymupdf.Document) -> None:
+    from xpdf.core.images import set_opacity
+
+    logo = _logo(doc)
+    set_opacity(doc, 0, logo.number, 0.5)  # type: ignore[attr-defined]
+    half = _px(doc, 480, 80)
+    expected = tuple(round((r + b) / 2) for r, b in zip(RED, BG))
+    assert _near(half, expected, 6)
+    assert _logo(doc).opacity == pytest.approx(0.5)  # type: ignore[attr-defined]
+    # volver a fijar 50 % no lo deja en 25 %
+    set_opacity(doc, 0, _logo(doc).number, 0.5)  # type: ignore[attr-defined]
+    assert _near(_px(doc, 480, 80), expected, 6)
+    set_opacity(doc, 0, _logo(doc).number, 1.0)  # type: ignore[attr-defined]
+    assert _near(_px(doc, 480, 80), RED) and _logo(doc).opacity == 1.0  # type: ignore[attr-defined]
+
+
+def test_move_keeps_opacity(doc: pymupdf.Document) -> None:
+    from xpdf.core.images import set_opacity
+
+    logo = _logo(doc)
+    set_opacity(doc, 0, logo.number, 0.5)  # type: ignore[attr-defined]
+    move_image(doc, 0, _logo(doc).number, (100, 400, 260, 480))  # type: ignore[attr-defined]
+    moved = image_at(doc, 0, 180, 440)
+    assert moved is not None and moved.opacity == pytest.approx(0.5)
+    assert moved.bbox == pytest.approx((100, 400, 260, 480), abs=0.5)
+    # y se puede seguir moviendo (las matrices se componen bien)
+    move_image(doc, 0, moved.number, (300, 500, 380, 540))
+    again = image_at(doc, 0, 340, 520)
+    assert again is not None and again.bbox == pytest.approx((300, 500, 380, 540), abs=0.5)
+
+
+def _text_dark_pixels(doc: pymupdf.Document, clip: pymupdf.Rect) -> int:
+    pix = doc[0].get_pixmap(dpi=72, clip=clip)
+    s, n = pix.samples, pix.n
+    return sum(1 for i in range(0, len(s), n) if max(s[i : i + 3]) < 90)
+
+
+def test_front_and_behind_text(doc: pymupdf.Document) -> None:
+    from xpdf.core.images import bring_to_front, send_behind_text
+
+    text = pymupdf.Rect(72, 286, 230, 302)  # «Texto encima del fondo»
+    assert _text_dark_pixels(doc, text) > 20
+    # el fondo, al frente, tapa el texto
+    bg = next(i for i in list_images(doc, 0) if i.bbox[2] - i.bbox[0] > 500)
+    bring_to_front(doc, 0, bg.number)
+    assert _text_dark_pixels(doc, text) == 0
+    assert "Texto encima del fondo" in doc[0].get_text()  # el texto sigue ahí
+    # y enviado detrás del texto, el texto vuelve a verse
+    bg = next(i for i in list_images(doc, 0) if i.bbox[2] - i.bbox[0] > 500)
+    assert send_behind_text(doc, 0, bg.number)
+    assert _text_dark_pixels(doc, text) > 20
+    bg = next(i for i in list_images(doc, 0) if i.bbox[2] - i.bbox[0] > 500)
+    assert not send_behind_text(doc, 0, bg.number)  # ya estaba detrás
+
+
+def test_logo_over_text_goes_behind(tmp_path: Path) -> None:
+    from xpdf.core.images import send_behind_text
+
+    d = pymupdf.open()
+    p = d.new_page()
+    p.insert_text((72, 100), "Texto que queda tapado", fontsize=16)
+    p.insert_image(pymupdf.Rect(60, 80, 300, 110), pixmap=_solid(RED), keep_proportion=False)  # encima del texto
+    d = pymupdf.open("pdf", d.tobytes())
+    clip = pymupdf.Rect(72, 86, 280, 104)
+    assert _text_dark_pixels(d, clip) == 0
+    logo = list_images(d, 0)[0]
+    assert send_behind_text(d, 0, logo.number)
+    assert _text_dark_pixels(d, clip) > 20
+    assert list_images(d, 0)[0].bbox == pytest.approx(logo.bbox, abs=0.5)
+
+
+def test_translucent_image_is_still_listed_and_editable(doc: pymupdf.Document) -> None:
+    """PyMuPDF deja de listar imágenes semitransparentes: xpdf no debe perderlas."""
+    from xpdf.core.images import set_opacity
+
+    logo = _logo(doc)
+    set_opacity(doc, 0, logo.number, 0.4)  # type: ignore[attr-defined]
+    again = image_at(doc, 0, 480, 80)
+    assert again is not None and again.opacity == pytest.approx(0.4)
+    assert again.bbox == pytest.approx((400, 40, 560, 120), abs=0.5)
+    assert (again.width, again.height) == (40, 20)
+    move_image(doc, 0, again.number, (100, 100, 180, 140))
+    moved = image_at(doc, 0, 140, 120)
+    assert moved is not None and moved.opacity == pytest.approx(0.4)
+    delete_image(doc, 0, moved.number)
+    # en ese punto solo queda el fondo de la página
+    assert all(i.bbox != pytest.approx((100, 100, 180, 140), abs=0.5) for i in list_images(doc, 0))

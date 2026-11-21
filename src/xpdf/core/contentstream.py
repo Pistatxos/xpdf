@@ -223,3 +223,83 @@ def replace_span(page: pymupdf.Page, draw: ImageDraw, new: bytes) -> None:
     doc = page.parent
     data = doc.xref_stream(draw.stream_xref) or b""
     doc.update_stream(draw.stream_xref, data[: draw.start] + new + data[draw.end :])
+
+
+@dataclass(frozen=True, slots=True)
+class Position:
+    """Un punto del contenido de la página y la CTM vigente en él."""
+
+    stream_xref: int
+    offset: int
+    ctm: pymupdf.Matrix
+    order: int  # orden global (para comparar con los dibujos)
+
+
+def first_text(page: pymupdf.Page) -> Position | None:
+    """Dónde empieza el primer texto (operador BT), o None si no hay texto."""
+    doc = page.parent
+    ctm = pymupdf.Matrix(1, 0, 0, 1, 0, 0)
+    stack: list[pymupdf.Matrix] = []
+    operands: list[Token] = []
+    order = 0
+    for xref in page.get_contents():
+        data = doc.xref_stream(xref) or b""
+        for tok in tokenize(data):
+            order += 1
+            if tok.kind != "op":
+                if tok.kind != "inline":
+                    operands.append(tok)
+                continue
+            op = tok.value
+            if op == b"BT":
+                return Position(xref, tok.start, pymupdf.Matrix(ctm), order)
+            if op == b"q":
+                stack.append(pymupdf.Matrix(ctm))
+            elif op == b"Q" and stack:
+                ctm = stack.pop()
+            elif op == b"cm" and len(operands) >= 6:
+                try:
+                    a, b, c, d, e, f = (float(t.value) for t in operands[-6:])
+                    ctm = pymupdf.Matrix(a, b, c, d, e, f) * ctm
+                except ValueError:
+                    pass
+            operands = []
+    return None
+
+
+def draw_order(page: pymupdf.Page, draw: ImageDraw) -> int:
+    """Orden global del dibujo en el contenido (mismo criterio que `first_text`)."""
+    doc = page.parent
+    order = 0
+    for xref in page.get_contents():
+        data = doc.xref_stream(xref) or b""
+        for tok in tokenize(data):
+            order += 1
+            if xref == draw.stream_xref and tok.end >= draw.end:
+                return order
+    return order
+
+
+def add_resource(page: pymupdf.Page, category: str, name: str, value: str) -> bool:
+    """Añade `/name value` al diccionario de recursos `category` de la página.
+
+    Devuelve False si la página hereda sus recursos (no se tocan).
+    """
+    doc = page.parent
+    kind, val = doc.xref_get_key(page.xref, "Resources")
+    if kind == "null":
+        return False
+    if kind == "xref":
+        res_xref = int(val.split()[0])
+        ckind, cval = doc.xref_get_key(res_xref, category)
+        if ckind == "xref":
+            doc.xref_set_key(int(cval.split()[0]), name, value)
+        else:
+            doc.xref_set_key(res_xref, f"{category}/{name}", value)
+        return True
+    ckind, cval = doc.xref_get_key(page.xref, f"Resources/{category}")
+    if ckind == "xref":
+        doc.xref_set_key(int(cval.split()[0]), name, value)
+    else:
+        doc.xref_set_key(page.xref, f"Resources/{category}/{name}", value)
+    return True

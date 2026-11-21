@@ -36,6 +36,7 @@ from xpdf.core.pages import delete_command, move_command, rotate_command
 from xpdf.ui.drop_zone import DropOverlay, WelcomeView
 from xpdf.ui.format_bar import FormatBar
 from xpdf.ui.icons import icon
+from xpdf.ui.image_bar import ImageBar
 from xpdf.ui.optimize_dialog import run_optimize_dialog
 from xpdf.ui.page_view import PageView, ViewTool
 from xpdf.ui.text_editor import TextEditorOverlay
@@ -94,6 +95,9 @@ class MainWindow(QMainWindow):
         self.select_tool = ImageSelectTool(self)
         self.image_tool = AddImageTool(self)
         self.view.set_tool(self.select_tool)  # «Seleccionar» es la herramienta inicial
+        self.image_bar = ImageBar(self.select_tool, self)
+        self.addToolBar(Qt.ToolBarArea.TopToolBarArea, self.image_bar)
+        self.image_bar.hide()
         self.format_bar.newStyleChanged.connect(self.add_tool.restyle)
         self.tool_group.triggered.connect(self._on_tool_changed)
 
@@ -420,6 +424,9 @@ class MainWindow(QMainWindow):
             self._error(error_title, "Ha ocurrido un error inesperado; el documento no se ha modificado.")
             return False
         return True
+
+    def image_selected(self, info: object) -> None:
+        self.image_bar.show_info(info)  # type: ignore[arg-type]
 
     def show_status(self, message: str, timeout_ms: int = 4000) -> None:
         if message:

@@ -20,7 +20,12 @@ xpdf prefiere no dejarte editar algo a estropearlo. Te lo dice al hacer clic en:
   ruta de composición menos fiel al original.
 - La vista previa mientras escribes usa el motor de texto del sistema: los cortes
   de línea pueden variar algo respecto al resultado final.
-- Al reemplazar una imagen, la nueva queda por encima del resto de elementos.
+- Al reemplazar una imagen, la nueva queda por encima del resto de elementos
+  (usa **Detrás del texto** si hace falta).
+- Al cambiar el orden de capas de una imagen que el PDF recortaba con una
+  máscara o un trazado, puede perder ese recorte.
+- El texto no rodea a las imágenes (un PDF no tiene flujo de texto): si hace
+  falta hueco, estrecha el párrafo con los tiradores.
 - En macOS solo hay versión para Apple Silicon (M1 o posterior).
 
 ## Privacidad

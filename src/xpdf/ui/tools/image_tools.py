@@ -41,6 +41,9 @@ class ImageToolHost(Protocol):
         """Ejecuta y apila el comando; muestra el error y devuelve False si falla."""
         ...
     def show_status(self, message: str, timeout_ms: int = 4000) -> None: ...
+    def image_selected(self, info: ImageInfo | None) -> None:
+        """Avisa a la barra de imagen de la selección actual."""
+        ...
 
 
 # --------------------------------------------------------------- dibujo
@@ -188,6 +191,8 @@ class ImageSelectTool(ViewTool):
         self._remove(self.box)
         self._remove(self.hover)
         self.box = self.hover = None
+        if self.info is not None:
+            self.host.image_selected(None)
         self.info = None
         self.drag = None
 
@@ -199,7 +204,24 @@ class ImageSelectTool(ViewTool):
         self.page, self.info = page, info
         self.box = TransformBox(item)
         self.box.set_rect(_qrect(info.bbox))
+        self.host.image_selected(info)
         self.host.show_status("Imagen seleccionada · arrastra para mover · esquinas para cambiar el tamaño (Mayús: libre) · Supr borra", 0)
+
+    def _reselect_at(self, page: int, bbox: Rect) -> None:
+        """Vuelve a seleccionar la imagen que ocupa `bbox` (su número puede cambiar
+        al cambiar el orden de capas)."""
+        doc = self.host.doc
+        if doc is None:
+            return
+        best, dist = None, 1e9
+        for info in core_images.images_on(doc, page):
+            d = sum(abs(a - b) for a, b in zip(info.bbox, bbox))
+            if d < dist:
+                best, dist = info, d
+        if best is not None and dist < 4:
+            self.select(page, best)
+        else:
+            self.clear()
 
     def _reselect(self, number: int) -> None:
         doc = self.host.doc
@@ -312,10 +334,16 @@ class ImageSelectTool(ViewTool):
             return True
         self.select(page, info)
         menu = QMenu(self.host.view)
+        front = QAction("Traer al frente", menu)
+        front.triggered.connect(self.to_front)
+        behind = QAction("Enviar detrás del texto", menu)
+        behind.triggered.connect(self.behind_text)
         rep = QAction("Reemplazar imagen…", menu)
         rep.triggered.connect(self.replace)
         dele = QAction("Borrar imagen", menu)
         dele.triggered.connect(self.delete)
+        menu.addActions([front, behind])
+        menu.addSeparator()
         menu.addActions([rep, dele])
         menu.exec(global_pos)
         return True
@@ -327,6 +355,37 @@ class ImageSelectTool(ViewTool):
         cmd = core_images.delete_command(self.host.doc, self.page, self.info.number)
         self.clear()
         self.host.run_doc_command(cmd, "No se pudo borrar la imagen")
+
+    def set_opacity(self, alpha: float) -> None:
+        if self.info is None or self.host.doc is None or abs(alpha - self.info.opacity) < 0.01:
+            return
+        page, number = self.page, self.info.number
+        cmd = core_images.opacity_command(self.host.doc, page, number, alpha)
+        if self.host.run_doc_command(cmd, "No se pudo cambiar la opacidad"):
+            self.page = page
+            self._reselect(number)
+
+    def to_front(self) -> None:
+        if self.info is None or self.host.doc is None:
+            return
+        page, bbox = self.page, self.info.bbox
+        cmd = core_images.front_command(self.host.doc, page, self.info.number)
+        if self.host.run_doc_command(cmd, "No se pudo traer la imagen al frente"):
+            self.page = page
+            self._reselect_at(page, bbox)
+            self.host.show_status("Imagen al frente", 3000)
+
+    def behind_text(self) -> None:
+        if self.info is None or self.host.doc is None:
+            return
+        page, bbox = self.page, self.info.bbox
+        cmd = core_images.behind_text_command(self.host.doc, page, self.info.number)
+        if self.host.run_doc_command(cmd, "No se pudo enviar la imagen detrás del texto"):
+            self.page = page
+            self._reselect_at(page, bbox)
+            self.host.show_status(
+                "Imagen detrás del texto" if cmd.result else "La imagen ya estaba detrás del texto", 3000
+            )
 
     def replace(self) -> None:
         if self.info is None or self.host.doc is None:

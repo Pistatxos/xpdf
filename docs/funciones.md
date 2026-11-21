@@ -37,6 +37,9 @@ cursiva. Los tiradores fijan un ancho a partir del cual el texto pasa de línea.
   - Arrastra para **moverla**; desde una esquina, **cambia el tamaño**
     (mantiene la proporción; con `Mayús`, libre).
   - `Supr` la **borra**; clic derecho → **Reemplazar imagen…** o **Borrar**.
+  - Con una imagen seleccionada aparece la barra **Imagen**: **opacidad** (del
+    10 al 100 %), **Traer al frente** y **Detrás del texto** (queda detrás del
+    texto pero delante de los fondos de la página).
   - Solo cambia esa imagen: si el mismo logo aparece en otras páginas o
     posiciones, esas no se tocan. Un fondo sigue quedando detrás del texto.
 - **Añadir imagen** (`I`): clic en la página, elige un PNG o JPG, colócala con
