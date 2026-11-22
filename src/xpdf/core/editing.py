@@ -256,8 +256,11 @@ class TextEditing:
         spans: list[Span],
         align: Align | None = None,
         box: tuple[float, float] | None = None,
+        offset: tuple[float, float] = (0.0, 0.0),
     ) -> SnapshotCommand[TextOutcome]:
-        """Comando que sustituye el párrafo por `spans` (para `History.push`)."""
+        """Comando que sustituye el párrafo por `spans` (para `History.push`).
+
+        `offset` (dx, dy) mueve el párrafo a otra posición de la página."""
         para = self._find(page, para_id)
         styles: list[TextStyle] = []
         for r in para.runs:
@@ -269,7 +272,7 @@ class TextEditing:
             # Se vuelve a detectar sobre el estado actual (por si se rehízo antes).
             current = self._find(page, para_id)
             res = replace_paragraph(
-                self.doc.raw, current, runs, FontResolver(self.doc.raw), align, box
+                self.doc.raw, current, runs, FontResolver(self.doc.raw), align, box, offset
             )
             return _outcome(res)
 

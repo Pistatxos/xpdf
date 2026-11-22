@@ -1173,6 +1173,14 @@ def _check_fits(page: pymupdf.Page, bbox: pymupdf.Rect) -> None:
         raise TextEditError("El texto no cabe en la página. Acórtalo o reduce el tamaño de letra.")
 
 
+def _check_inside(page: pymupdf.Page, bbox: pymupdf.Rect) -> None:
+    """Al mover un párrafo: que no se salga por ningún lado."""
+    r = page.rect
+    if bbox.x0 < r.x0 - 0.5 or bbox.y0 < r.y0 - 0.5 or bbox.x1 > r.x1 + 0.5:
+        raise TextEditError("El texto se saldría de la página. Muévelo un poco hacia dentro.")
+    _check_fits(page, bbox)
+
+
 def _texts_by_style(runs: Sequence[Run]) -> dict[TextStyle, str]:
     out: dict[TextStyle, str] = {}
     for r in runs:
@@ -1214,13 +1222,17 @@ def replace_paragraph(
     resolver: FontResolverLike,
     align: Align | None = None,
     box: tuple[float, float] | None = None,
+    offset: tuple[float, float] = (0.0, 0.0),
 ) -> EditResult:
     """Sustituye el párrafo `para` por `runs`, refluyendo dentro del ancho original.
 
     `box` (x0, x1 visuales) sustituye el ancho disponible: el usuario puede
-    ensanchar o estrechar la caja. Si el texto nuevo crece, la caja se amplía
-    hacia abajo. Si no cabe en la página, lanza `TextEditError` sin tocar nada.
+    ensanchar o estrechar la caja. `offset` (dx, dy) mueve el párrafo; con
+    `box`, dx ya va incluido en la caja y se ignora. Si el texto nuevo crece,
+    la caja se amplía hacia abajo. Si no cabe en la página, lanza
+    `TextEditError` sin tocar nada.
     """
+    dx, dy = offset
     if para.blocked_reason:
         raise TextEditError(para.blocked_reason)
     page = doc[para.page_index]
@@ -1231,7 +1243,9 @@ def replace_paragraph(
         redact_lines(page, para.lines)
         return EditResult((x0, y0, x0, y0), ())
     if lay.needs_shaping(new_text) or lay.needs_shaping(para.text):
-        return _replace_with_story(doc, para, runs, resolver, align)
+        if box is not None:
+            dx = box[0] - para.bbox[0]
+        return _replace_with_story(doc, para, runs, resolver, align, (dx, dy))
 
     # Caja de recomposición: la del párrafo, o más ancha si es una línea suelta.
     box_x0, box_x1 = para.box if para.box != (0.0, 0.0) else (x0, x1)
@@ -1244,15 +1258,20 @@ def replace_paragraph(
             raise TextEditError("La caja es demasiado estrecha para el texto.")
         box_x0, box_x1 = box
         slack = 0.0  # caja nueva: no hay cortes originales que reproducir
+    else:
+        box_x0, box_x1 = box_x0 + dx, box_x1 + dx
     tokens = _tokens(runs, picker, para.metrics)
     new_align = align or para.align
     if len(para.lines) == 1 and new_align == "justify":
         new_align = "left"  # una línea suelta no se estira
     result = lay.layout(
-        tokens, box_x0, box_x1, para.first_baseline, para.line_pitch,
+        tokens, box_x0, box_x1, para.first_baseline + dy, para.line_pitch,
         new_align, para.indent, slack,
     )
-    _check_fits(page, result.bbox)
+    if (dx, dy) != (0.0, 0.0):
+        _check_inside(page, result.bbox)
+    else:
+        _check_fits(page, result.bbox)
     overlaps = _overlaps(result.bbox, _other_text_rects(page, para.lines))
     redact_lines(page, para.lines)
     lay.write(page, result)
@@ -1266,6 +1285,7 @@ def _replace_with_story(
     runs: Sequence[Run],
     resolver: FontResolverLike,
     align: Align | None,
+    offset: tuple[float, float] = (0.0, 0.0),
 ) -> EditResult:
     """Ruta para escrituras que necesitan motor de forma (árabe, hebreo, índicas...)."""
     page = doc[para.page_index]
@@ -1284,6 +1304,10 @@ def _replace_with_story(
     rect, bbox = _place(
         page, body_x0, x1, y0, html_text, css, fonts, para.align, target, para.first_baseline
     )
+    if offset != (0.0, 0.0):
+        rect = rect + (offset[0], offset[1], offset[0], offset[1])
+        bbox = bbox + (offset[0], offset[1], offset[0], offset[1])
+        _check_inside(page, bbox)
     redact_lines(page, para.lines)
     spare = _write_box(page, _visual_to_raw(page, rect), html_text, css, fonts)
     if spare < 0:  # no debería pasar: ya se midió

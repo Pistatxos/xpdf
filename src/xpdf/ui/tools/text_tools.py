@@ -151,7 +151,9 @@ class EditTextTool(ViewTool):
         ov.focus()
         self.host.editor_changed(ov, "edit")
         fonts = sorted({s.font_name for s in para.styles})
-        self.host.show_status("Editando: " + ", ".join(fonts) + "  ·  Esc cancela, Ctrl+Intro confirma", 0)
+        self.host.show_status(
+            "Editando: " + ", ".join(fonts) + "  ·  el asa ✥ mueve el texto  ·  Esc cancela, Ctrl+Intro confirma", 0
+        )
 
     def _close(self) -> None:
         if self.overlay is not None:
@@ -174,10 +176,14 @@ class EditTextTool(ViewTool):
             return
         spans = ov.spans()
         align = ov.align_override if ov.align_override != para.align else None
-        if align is None and ov.box_override is None and _unchanged(para, spans):
+        dx, dy = ov.offset()
+        moved = abs(dx) > 0.2 or abs(dy) > 0.2
+        if align is None and ov.box_override is None and not moved and _unchanged(para, spans):
             self._close()
             return
-        cmd = ed.edit_command(para.page, para.id, spans, align, ov.box_override)  # type: ignore[arg-type]
+        # Con caja nueva, el desplazamiento horizontal ya va en la caja.
+        offset = (0.0 if ov.box_override is not None else dx, dy) if moved else (0.0, 0.0)
+        cmd = ed.edit_command(para.page, para.id, spans, align, ov.box_override, offset)  # type: ignore[arg-type]
         outcome = self.host.run_command(cmd)
         if outcome is None:
             # Error (p. ej. no cabe): se deja el editor abierto para corregir.
@@ -260,9 +266,9 @@ class AddTextTool(ViewTool):
             return
         try:
             box = ov.box_override
-            x = box[0] if box else self.pos.x()
+            x = box[0] if box else ov.pos().x()  # el usuario puede haberla movido
             width = (box[1] - box[0]) if box else None
-            cmd = ed.add_command(self.page, x, self.pos.y(), text, self.host.new_text_style(), width)
+            cmd = ed.add_command(self.page, x, ov.pos().y(), text, self.host.new_text_style(), width)
         except XpdfError as err:
             self.host.show_status(str(err), 6000)
             return

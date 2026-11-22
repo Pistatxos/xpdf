@@ -23,6 +23,7 @@ from PySide6.QtGui import (
     QPainter,
     QPainterPath,
     QPen,
+    QRawFont,
     QTextBlockFormat,
     QTextCharFormat,
     QTextCursor,
@@ -64,11 +65,27 @@ def _load(data: bytes | None) -> str | None:
     if not data:
         return None
     key = hashlib.sha1(data).hexdigest()
+    if key not in _loaded_fonts and not _usable(data):
+        # Qt «carga» algunas fuentes (p. ej. CFF CID sin tabla de caracteres)
+        # pero dibuja todo en blanco: se usa una genérica del mismo tipo.
+        _loaded_fonts[key] = None
     if key not in _loaded_fonts:
         fid = QFontDatabase.addApplicationFontFromData(data)
         fams = QFontDatabase.applicationFontFamilies(fid) if fid >= 0 else []
         _loaded_fonts[key] = fams[0] if fams else None
     return _loaded_fonts[key]
+
+
+_PROBE = "0123456789 abcdefghijklmnopqrstuvwxyz ABCDEFGHIJKLMNOPQRSTUVWXYZ áéíóúñ.,"
+
+
+def _usable(data: bytes) -> bool:
+    """¿Qt sabe dibujar esta fuente? (algún carácter normal con anchura)"""
+    raw = QRawFont(data, 12)
+    if not raw.isValid():
+        return False
+    glyphs = raw.glyphIndexesForString(_PROBE)
+    return any(g and a.x() > 0 for g, a in zip(glyphs, raw.advancesForGlyphIndexes(glyphs)))
 
 
 def fallback_family_for(style: StyleInfo) -> str:
@@ -197,6 +214,65 @@ class _Handle(QGraphicsRectItem):
         event.accept()
 
 
+class _MoveHandle(QGraphicsRectItem):
+    """Asa encima de la esquina superior izquierda para mover la caja de texto."""
+
+    S = 20.0  # píxeles de pantalla
+    GAP = 4.0
+
+    def __init__(self, overlay: TextEditorOverlay) -> None:
+        super().__init__(QRectF(-self.S - self.GAP, -self.S - self.GAP, self.S, self.S), overlay)
+        self.overlay = overlay
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations, True)
+        self.setCursor(Qt.CursorShape.SizeAllCursor)
+        self.setAcceptHoverEvents(True)
+        self.setZValue(2)
+        self.setToolTip("Arrastra para mover el texto")
+        self._start = QPointF()
+        self._start_pos = QPointF()
+
+    def boundingRect(self) -> QRectF:
+        return self.rect().adjusted(-4, -4, 4, 4)
+
+    def shape(self) -> QPainterPath:
+        path = QPainterPath()
+        path.addRect(self.boundingRect())
+        return path
+
+    def paint(self, painter: QPainter, option: object, widget: QWidget | None = None) -> None:
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        r = self.rect()
+        painter.setBrush(QBrush(_ACCENT))
+        painter.setPen(QPen(QColor(255, 255, 255), 1.5))
+        painter.drawRoundedRect(r, 4, 4)
+        # flechas en cruz
+        c = r.center()
+        a = r.width() * 0.3
+        t = 2.6
+        painter.setPen(QPen(QColor(255, 255, 255), 1.4))
+        painter.drawLine(QPointF(c.x() - a, c.y()), QPointF(c.x() + a, c.y()))
+        painter.drawLine(QPointF(c.x(), c.y() - a), QPointF(c.x(), c.y() + a))
+        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            tip = QPointF(c.x() + dx * a, c.y() + dy * a)
+            back = QPointF(tip.x() - dx * t, tip.y() - dy * t)
+            painter.drawLine(tip, QPointF(back.x() + dy * t, back.y() + dx * t))
+            painter.drawLine(tip, QPointF(back.x() - dy * t, back.y() - dx * t))
+
+    def mousePressEvent(self, event: QGraphicsSceneMouseEvent) -> None:
+        self._start = event.scenePos()
+        self._start_pos = self.overlay.pos()
+        event.accept()
+
+    def mouseMoveEvent(self, event: QGraphicsSceneMouseEvent) -> None:
+        d = event.scenePos() - self._start  # escena en puntos PDF, página sin escalar
+        self.overlay.move_to(self._start_pos + d)
+        event.accept()
+
+    def mouseReleaseEvent(self, event: QGraphicsSceneMouseEvent) -> None:
+        self.overlay.focus()
+        event.accept()
+
+
 class TextEditorOverlay(QGraphicsProxyWidget):
     """Editor colocado sobre la página `page_item` en coordenadas de página."""
 
@@ -233,6 +309,9 @@ class TextEditorOverlay(QGraphicsProxyWidget):
         self._frame.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
         self._frame.setZValue(1)
         self._handles = (_Handle(self, "left"), _Handle(self, "right"))
+        self._mover = _MoveHandle(self)
+        #: Posición inicial: lo que se haya movido el usuario es pos() - origin.
+        self.origin = QPointF()
 
     # ------------------------------------------------------------- configurar
     def load_paragraph(self, para: ParagraphInfo) -> None:
@@ -255,6 +334,7 @@ class TextEditorOverlay(QGraphicsProxyWidget):
         self._place(QRectF(bx0, y0, (bx1 - bx0) + 1.5, max(y1 - y0, para.line_pitch)))
         # Se alinea la línea base del primer renglón de Qt con la del PDF.
         self.setPos(bx0, para.first_baseline - self._first_baseline_offset())
+        self.origin = self.pos()
         self.edit.moveCursor(QTextCursor.MoveOperation.End)
 
     def _first_baseline_offset(self) -> float:
@@ -279,6 +359,7 @@ class TextEditorOverlay(QGraphicsProxyWidget):
         self.edit.setWordWrapMode(QTextOption.WrapMode.NoWrap)
         self._max_width = max_width
         self._place(QRectF(pos.x(), pos.y(), 40.0, style.size * 1.4))
+        self.origin = self.pos()
 
     def apply_style(self, style: StyleInfo) -> None:
         """Aplica un estilo a todo el texto (texto nuevo: un único estilo)."""
@@ -402,6 +483,23 @@ class TextEditorOverlay(QGraphicsProxyWidget):
             return float(pdf) if isinstance(pdf, float) else None
         return qt * max(self.edit.logicalDpiY(), 1) / 72.0
 
+    def offset(self) -> tuple[float, float]:
+        """Cuánto ha movido el usuario la caja (dx, dy), en puntos."""
+        d = self.pos() - self.origin
+        return (d.x(), d.y())
+
+    def move_to(self, pos: QPointF) -> None:
+        """Mueve la caja (sin salirse de la página)."""
+        page = self.parentItem().boundingRect() if self.parentItem() is not None else None
+        x, y = pos.x(), pos.y()
+        if page is not None:
+            x = min(max(x, 0.0), page.width() - self.size().width())
+            y = min(max(y, 0.0), page.height() - self.size().height())
+        dx = x - self.pos().x()
+        self.setPos(x, y)
+        if self.box_override is not None:
+            self.box_override = (self.box_override[0] + dx, self.box_override[1] + dx)
+
     def set_box(self, x: float, width: float) -> None:
         """El usuario cambió el ancho con un tirador: el texto se recoloca."""
         self.setPos(x, self.pos().y())
@@ -435,3 +533,4 @@ class TextEditorOverlay(QGraphicsProxyWidget):
         # Centrados en los bordes; su tamaño en pantalla es fijo (ignoran el zoom).
         self._handles[0].setPos(-1, h / 2)
         self._handles[1].setPos(w + 1, h / 2)
+        self._mover.setPos(-1, -1)

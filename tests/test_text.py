@@ -326,3 +326,23 @@ def test_single_line_grows_horizontally_and_keeps_style() -> None:
     assert all(r.style.italic for r in after.runs)
     # sigue centrada respecto al mismo eje
     assert (after.bbox[0] + after.bbox[2]) / 2 == pytest.approx((v.bbox[0] + v.bbox[2]) / 2, abs=1.5)
+
+
+def test_move_paragraph_keeps_line_breaks() -> None:
+    doc = _page_with(f"<p style='text-align:justify'>{LOREM}</p>")
+    p = detect_paragraphs(doc, 0)[0]
+    replace_paragraph(doc, p, p.runs, FakeResolver(), offset=(30.0, 200.0))
+    q = detect_paragraphs(doc, 0)
+    assert len(q) == 1 and q[0].text == LOREM
+    assert len(q[0].lines) == len(p.lines)  # mismos cortes de línea
+    assert q[0].bbox[0] == pytest.approx(p.bbox[0] + 30, abs=0.6)
+    assert q[0].first_baseline == pytest.approx(p.first_baseline + 200, abs=0.3)
+    assert not doc[0].get_text("text", clip=pymupdf.Rect(p.bbox)).strip()  # el sitio viejo, vacío
+
+
+def test_move_paragraph_outside_page_fails() -> None:
+    doc = _page_with(f"<p>{LOREM}</p>")
+    p = detect_paragraphs(doc, 0)[0]
+    with pytest.raises(TextEditError, match="saldría"):
+        replace_paragraph(doc, p, p.runs, FakeResolver(), offset=(-200.0, 0.0))
+    assert detect_paragraphs(doc, 0)[0].bbox[0] == pytest.approx(p.bbox[0], abs=0.1)  # sin tocar

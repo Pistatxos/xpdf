@@ -12,6 +12,8 @@ ancho.
 - Negrita, cursiva, tamaño y color por tramos (barra de formato).
 - Arrastra los **tiradores azules** de los lados para ensanchar o estrechar la
   caja. Una línea suelta crece sola en horizontal hasta el margen.
+- Arrastra el **asa ✥** de la esquina superior izquierda para **mover** el
+  texto a otro sitio de la página (también al añadir texto nuevo).
 - `Esc` cancela; `Ctrl+Intro` o un clic fuera confirma.
 
 ### La misma letra que el original
